@@ -57,7 +57,12 @@ The application is run from the command line with a **directory path**
 containing your data files:
 
 ```bash
-python plotPACEMAPP_plotly.py --directory /path/to/your/data/files
+python plotPACEMAPP_plotly.py --directory '/path/to/your/data/files'
+```
+
+Example: running with provided testData
+```bash
+python plotPACEMAPP_plotly.py --directory './testData'
 ```
 
 The directory should contain `.h5` or `.nc` files with PACE-MAPP retrieval

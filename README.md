@@ -6,7 +6,8 @@ This Python application creates an interactive web-based visualization tool for
 exploring atmospheric aerosol properties from PACE (Plankton, Aerosol, Cloud,
 ocean Ecosystem). PACE intstruments are HARP2 (polarimeter), SPEXone
 (polarimeter), and OCI and the Microphysical Aerosol Properties from
-Polarimetry (MAPP) retrieval framework (Stamnes et al.).
+Polarimetry (MAPP) retrieval framework [(Stamnes et
+al.)](https://www.frontiersin.org/journals/remote-sensing/articles/10.3389/frsen.2023.1174672/full).
 
 The tool displays three interconnected plots that help users analyze the spatial
 distribution of aerosol properties and the "quality" of the retrieval, or how

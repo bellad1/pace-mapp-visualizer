@@ -7,7 +7,7 @@ exploring atmospheric aerosol properties from PACE (Plankton, Aerosol, Cloud,
 ocean Ecosystem). PACE intstruments are HARP2 (polarimeter), SPEXone
 (polarimeter), and OCI and the Microphysical Aerosol Properties from
 Polarimetry (MAPP) retrieval framework [(Stamnes et
-al.)](https://www.frontiersin.org/journals/remote-sensing/articles/10.3389/frsen.2023.1174672/full).
+al., 2023)](https://www.frontiersin.org/journals/remote-sensing/articles/10.3389/frsen.2023.1174672/full).
 
 The tool displays three interconnected plots that help users analyze the spatial
 distribution of aerosol properties and the "quality" of the retrieval, or how
@@ -46,9 +46,9 @@ activate the environment:
 source myenv/bin/activate
 ```
 
-install the required Python packages:
+install the required Python packages from requirements.txt
 ```bash
-pip install dash plotly h5py numpy
+pip install -r requirements.txt
 ```
 
 ## How to Run the Application
@@ -268,9 +268,9 @@ print(f"Min/max values: {np.min(data_array):.3f} / {np.max(data_array):.3f}")
 print(f"Number of valid points: {np.sum(np.isfinite(data_array))}")
 ```
 
-## Extending the Code
+## Extending/modifying the Code
 
-### Ideas for Student Projects
+### Ideas for Student Involvement/Addition
 
 1. **Add statistical analysis**: Calculate correlations between different aerosol properties
 2. **Implement data export**: Allow downloading filtered datasets as CSV files  

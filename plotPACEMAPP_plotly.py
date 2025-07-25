@@ -1067,7 +1067,7 @@ def create_combined_intensity_dolp_plot(intensity_data, dolp_data, wavelengths, 
         rows=2, cols=1,
         subplot_titles=("Intensity vs VZA", "DoLP vs VZA"),
         vertical_spacing=0.20,  # spacing between plots
-        shared_xaxes=True,
+        shared_xaxes=False,
         # remove default subplot title spacing
         specs=[[{"secondary_y": False}], [{"secondary_y": False}]]
     )
@@ -1136,7 +1136,7 @@ def create_combined_intensity_dolp_plot(intensity_data, dolp_data, wavelengths, 
 
     # Update layout with legend positioned in the middle
     fig.update_layout(
-        height=800,
+        height=1100,
         showlegend=True,
         # minimize overall margins
         margin=dict(
@@ -1174,6 +1174,11 @@ def create_combined_intensity_dolp_plot(intensity_data, dolp_data, wavelengths, 
         title_text="Viewing Zenith Angle (degrees)",
         title_standoff=8,  # reduce space btw axis and title
         row=2, col=1
+    )
+    fig.update_xaxes(
+        title_text="Viewing Zenith Angle (degrees)",
+        title_standoff=8,  # reduce space btw axis and title
+        row=1, col=1
     )
     fig.update_yaxes(
         title_text="Intensity",
@@ -1225,7 +1230,7 @@ def create_residual_plot(data_dict, selected_row, selected_col, residual_type='b
                 rows=2, cols=1,
                 subplot_titles=("Intensity Residuals vs VZA", "DoLP Residuals vs VZA"),
                 vertical_spacing=0.20,
-                shared_xaxes=True,
+                shared_xaxes=False,
                 # remove default subplot title spacing
                 specs=[[{"secondary_y": False}], [{"secondary_y": False}]]
             )
@@ -1270,7 +1275,7 @@ def create_residual_plot(data_dict, selected_row, selected_col, residual_type='b
 
             # Update layout
             fig.update_layout(
-                height=800,
+                height=1100,
                 showlegend=True,
                 margin=dict(l=50, r=40, t=40, b=40),
                 legend=dict(
@@ -1293,6 +1298,7 @@ def create_residual_plot(data_dict, selected_row, selected_col, residual_type='b
 
             # update the axes
             fig.update_xaxes(title_text="Viewing Zenith Angle (degrees)", row=2, col=1)
+            fig.update_xaxes(title_text="Viewing Zenith Angle (degrees)", row=1, col=1)
             fig.update_yaxes(title_text="Intensity Residual", row=1, col=1)
             fig.update_yaxes(title_text="DoLP Residual", row=2, col=1)
 

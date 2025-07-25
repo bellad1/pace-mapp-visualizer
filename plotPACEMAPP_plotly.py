@@ -1205,6 +1205,193 @@ def create_combined_intensity_dolp_plot(intensity_data, dolp_data, wavelengths, 
 
     return fig
 
+# Create the residual plot
+def create_residual_plot(data_dict, selected_row, selected_col, residual_type='both'):
+
+    # Residual is taken for intensity and/or dolp by doing measured value - modeled value
+    # Can pick between just showing one variable and both
+
+    try:
+        # Get the intensity and DoLP data for the selected point
+        intensity_data, dolp_data, wavelengths = get_channel_intensity_dolp_vza(
+            data_dict, selected_row, selected_col)
+
+        wl_colors = generate_wavelength_colors(wavelengths)
+
+        # Determine which type was chosen in dropdown
+        if residual_type == 'both':
+            # Create subplots for both intensity and DoLP residuals (similar to how plot is made in main)
+            fig = make_subplots(
+                rows=2, cols=1,
+                subplot_titles=("Intensity Residuals vs VZA", "DoLP Residuals vs VZA"),
+                vertical_spacing=0.20,
+                shared_xaxes=True,
+                # remove default subplot title spacing
+                specs=[[{"secondary_y": False}], [{"secondary_y": False}]]
+            )
+
+            # Add intensity residuals
+            for wl in wavelengths:
+                name = f'{wl} nm'
+
+                # calc intensity residuals
+                intensity_residuals = np.array(intensity_data[wl]['y_meas']) - np.array(intensity_data[wl]['y_model'])
+
+                fig.add_trace(
+                    go.Scatter(
+                        x=intensity_data[wl]['x'],
+                        y=intensity_residuals,
+                        mode='markers+lines',
+                        name=name,
+                        line=dict(color=wl_colors[wl], width=2),
+                        marker=dict(color=wl_colors[wl], size=6),
+                        legendgroup=f'wl{wl}',
+                        showlegend=True
+                    ),
+                    row=1, col=1
+                )
+
+                # calc dolp residuals
+                dolp_residuals = np.array(dolp_data[wl]['y_meas']) - np.array(dolp_data[wl]['y_model'])
+
+                fig.add_trace(
+                    go.Scatter(
+                        x=dolp_data[wl]['x'],
+                        y=dolp_residuals,
+                        mode='markers+lines',
+                        name=name,
+                        line=dict(color=wl_colors[wl], width=2),
+                        marker=dict(color=wl_colors[wl], size=6),
+                        legendgroup=f'wl{wl}',
+                        showlegend=False
+                    ),
+                    row=2, col=1
+                )
+
+            # Update layout
+            fig.update_layout(
+                height=800,
+                showlegend=True,
+                margin=dict(l=50, r=40, t=40, b=40),
+                legend=dict(
+                    orientation="h",
+                    yanchor="middle",
+                    y=0.5,
+                    xanchor="center",
+                    x=0.5,
+                    bgcolor="rgba(255,255,255,0.9)",
+                    bordercolor="rgba(0,0,0,0.3)",
+                    borderwidth=1,
+                    title=dict(
+                        text="<b>Wavelengths</b> (Residuals = Measured - Modeled)",
+                        font=dict(size=14, family="Arial", color="black"),
+                        side="top"
+                    )
+                ),
+                autosize=True
+            )
+
+            # update the axes
+            fig.update_xaxes(title_text="Viewing Zenith Angle (degrees)", row=2, col=1)
+            fig.update_yaxes(title_text="Intensity Residual", row=1, col=1)
+            fig.update_yaxes(title_text="DoLP Residual", row=2, col=1)
+
+        elif residual_type == 'intensity':
+            # just intensity plot
+            fig = go.Figure()
+
+            for wl in wavelengths:
+                name = f'{wl} nm'
+
+                # calc intensity residuals
+                intensity_residuals = np.array(intensity_data[wl]['y_meas']) - np.array(intensity_data[wl]['y_model'])
+
+                fig.add_trace(
+                    go.Scatter(
+                        x=intensity_data[wl]['x'],
+                        y=intensity_residuals,
+                        mode='markers+lines',
+                        name=name,
+                        line=dict(color=wl_colors[wl], width=2),
+                        marker=dict(color=wl_colors[wl], size=6)
+                    )
+                )
+
+            fig.update_layout(
+                title="Intensity Residuals vs VZA",
+                xaxis_title="Viewing Zenith Angle (degrees)",
+                yaxis_title="Intensity Residual (Measured - Modeled)",
+                height=800,
+                showlegend=True,
+                margin=dict(l=50, r=40, t=60, b=40),
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1
+                ),
+                autosize=True
+            )
+
+        elif residual_type == 'dolp':
+            # just dolp plot
+            fig = go.Figure()
+
+            for wl in wavelengths:
+                name = f'{wl} nm'
+
+                # calc dolp residual
+                dolp_residuals = np.array(dolp_data[wl]['y_meas']) - np.array(dolp_data[wl]['y_model'])
+
+                fig.add_trace(
+                    go.Scatter(
+                        x=dolp_data[wl]['x'],
+                        y=dolp_residuals,
+                        mode='markers+lines',
+                        name=name,
+                        line=dict(color=wl_colors[wl], width=2),
+                        marker=dict(color=wl_colors[wl], size=6)
+                    )
+                )
+
+            fig.update_layout(
+                title="DoLP Residuals vs VZA",
+                xaxis_title="Viewing Zenith Angle (degrees)",
+                yaxis_title="DoLP Residual (Measured - Modeled)",
+                height=800,
+                showlegend=True,
+                margin=dict(l=50, r=40, t=60, b=40),
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1
+                ),
+                autosize=True
+            )
+
+        return fig
+
+    except Exception as e:
+        print(f"Error creating residual plot: {e}")
+        # Returns an empty figure with error message
+        fig = go.Figure()
+        fig.add_annotation(
+            text=f"Error creating residual plot: {str(e)}",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5,
+            showarrow=False,
+            font=dict(size=16, color="red")
+        )
+        fig.update_layout(
+            title="Residual Analysis - Error",
+            xaxis_title="Viewing Zenith Angle (degrees)",
+            yaxis_title="Residual Value",
+            height=800
+        )
+        return fig
 
 def create_properties_table(filtered_data, selected_row, selected_col):
     """Create a table showing aerosol properties by mode"""
@@ -1290,6 +1477,121 @@ def create_properties_table(filtered_data, selected_row, selected_col):
 
     return html.Table(table_rows, style={'width': '100%', 'borderCollapse': 'collapse'})
 
+# Create AOD Histogram
+def create_aod_histogram(data_dict, selected_property, max_cost, bin_size=0.1):
+    """
+    Create histogram of AOD values for selected wavelength with cost filtering
+    bin_size: Size of histogram bins (set at 0.1)
+    """
+
+    # Filter data by cost function first
+    filtered_data, original_indices = filter_by_cost(data_dict, max_cost)
+
+    # Get the AOD data for the selected property
+    aod_data = filtered_data[selected_property].flatten()
+
+    # Remove invalid values
+    valid_mask = np.isfinite(aod_data)
+    aod_valid = aod_data[valid_mask]
+
+    if len(aod_valid) == 0:
+        # Return empty figure if there's no valid data
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No valid data for selected property and cost filter",
+            x=0.5, y=0.5,
+            xref="paper", yref="paper",
+            showarrow=False,
+            font=dict(size=16)
+        )
+        fig.update_layout(
+            title="AOD Frequency Histogram",
+            xaxis_title="AOD Value",
+            yaxis_title="Frequency",
+            height=500
+        )
+        return fig
+
+    # Calculate bins
+    min_val = np.floor(np.min(aod_valid) / bin_size) * bin_size
+    max_val = np.ceil(np.max(aod_valid) / bin_size) * bin_size
+    bins = np.arange(min_val, max_val + bin_size, bin_size)
+
+    # Compute the histogram
+    counts, bin_edges = np.histogram(aod_valid, bins=bins)
+
+    # Create bin centers
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+
+    # Fix property name to make title
+    wavelengths = data_dict['wavelengths']
+    title_property = selected_property.replace('_', ' ').title()
+    for wl in wavelengths:
+        wl_str = str(int(wl))
+        title_property = title_property.replace(f'{wl_str}', f'{wl_str} nm')
+
+    # More cleanup
+    replacements = {
+        'Optical Depth': 'AOD',
+        'Fine': '(Fine Mode)',
+        'Coarse': '(Coarse Mode)',
+        'Total': '(Total)'
+    }
+    for old, new in replacements.items():
+        title_property = title_property.replace(old, new)
+
+    # Create the histogram plot
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Bar(
+            x=bin_centers,
+            y=counts,
+            width=bin_size,
+            marker=dict(
+                color='steelblue',
+                opacity=0.7,
+                line=dict(color='darkblue', width=1)
+            ),
+            hovertemplate=(
+                'AOD Range: %{x:.2f} - %{customdata:.2f}<br>' +
+                'Frequency: %{y}<br>' +
+                '<extra></extra>'
+            ),
+            customdata=bin_centers + bin_size/2
+        )
+    )
+
+    # Add statistics summary
+    stats_text = (
+        f"Total Points: {len(aod_valid)}<br>" +
+        f"Mean: {np.mean(aod_valid):.3f}<br>" +
+        f"Std: {np.std(aod_valid):.3f}<br>" +
+        f"Min: {np.min(aod_valid):.3f}<br>" +
+        f"Max: {np.max(aod_valid):.3f}"
+    )
+
+    fig.add_annotation(
+        text=stats_text,
+        x=0.98, y=0.98,
+        xref="paper", yref="paper",
+        xanchor="right", yanchor="top",
+        bgcolor="rgba(255,255,255,0.8)",
+        bordercolor="gray",
+        borderwidth=1,
+        font=dict(size=10)
+    )
+
+    fig.update_layout(
+        title=f"AOD Frequency Histogram: {title_property}<br><sub>Cost Filter: ≤ {max_cost:.2f}</sub>",
+        xaxis_title="AOD Value",
+        yaxis_title="Frequency",
+        height=500,
+        margin=dict(l=60, r=20, t=80, b=60),
+        showlegend=False
+    )
+
+    return fig
 
 # =============================================================================
 # EXPORT FUNCTIONS
@@ -2093,7 +2395,8 @@ def run_app(initial_file_path, directory_path):
             # Group variables for the dropdown
             dropdown_options = create_dropdown_options(sorted_variables, display_names, variable_metadata)
 
-            # Updated app layout with new 3 column design
+
+            # Updated app layout with tabs
             app.layout = html.Div([
                 # Add download component and stores
                 dcc.Download(id='download-image'),
@@ -2113,214 +2416,564 @@ def run_app(initial_file_path, directory_path):
                             'color': '#2c3e50'
                         }),
 
-                # Main three-column layout
-                html.Div([
-
-                    # LEFT COLUMN - Controls and Properties
-                    html.Div([
-                        # Controls section
+                # Tabs component
+                dcc.Tabs(id="visualization-tabs", value='tab-all', children=[
+                    # About Tab
+                    dcc.Tab(label='About', value='tab-about', children=[
                         html.Div([
-                            html.H3("Controls", style={
-                                'margin': '0 0 10px 0',
-                                'color': '#34495e',
-                                'fontSize': '18px',
-                                'textDecoration': 'underline',
-                                'display': 'inline-block'
+                            html.H2("About PACE-MAPP Aerosol Properties Visualization Tool",
+                                  style={'textAlign': 'center', 'marginBottom': '20px', 'color': '#2c3e50'})], style={
+                            'padding': '20px'
+                            # 'backgroundColor': ''
+                            # 'minHeight': '800px'
+                        }),
+                        html.P("TThis Python application creates an interactive web-based visualization tool for exploring atmospheric aerosol properties from PACE (Plankton, Aerosol, Cloud, ocean Ecosystem). PACE intstruments are HARP2 (polarimeter), SPEXone (polarimeter), and OCI and the Microphysical Aerosol Properties from Polarimetry (MAPP) retrieval framework (Stamnes et al., 2023).", style={'textAlign': 'center'})
+                    ]),
+
+                    # Individual Tab
+                    dcc.Tab(label='Individual', value='tab-individual', children=[
+                        # Main three-column layout for Individual tab
+                        html.Div([
+
+                            # LEFT COLUMN - Controls and Properties
+                            html.Div([
+                                # Controls section
+                                html.Div([
+                                    html.H3("Controls", style={
+                                        'margin': '0 0 10px 0',
+                                        'color': '#34495e',
+                                        'fontSize': '18px',
+                                        'textDecoration': 'underline',
+                                        'display': 'inline-block'
+                                    }),
+
+                                    # File selector
+                                    html.Div([
+                                        html.Label("Select File:", style={
+                                            'fontWeight': 'bold',
+                                            'marginBottom': '5px',
+                                            'display': 'block',
+                                            'fontSize': '16px'
+                                        }),
+                                        dcc.Dropdown(
+                                            id='file-selector',
+                                            options=file_options,
+                                            value=initial_file_path,
+                                            style={
+                                                'marginBottom': '15px',
+                                                'fontSize': '12px'
+                                            }
+                                        ),
+                                    ]),
+
+                                    # Aerosol property selector
+                                    html.Div([
+                                        html.Label("Select Retrieval Property:", style={
+                                            'fontWeight': 'bold',
+                                            'marginBottom': '5px',
+                                            'display': 'block',
+                                            'fontSize': '16px'
+                                        }),
+                                        dcc.Dropdown(
+                                            id='property-selector',
+                                            options=dropdown_options,
+                                            value=default_var,
+                                            style={
+                                                'marginBottom': '25px',
+                                                'height': '24px',
+                                                'fontSize': '16px'
+                                            }
+                                        ),
+                                    ]),
+
+                                    # Lat/Lon inputs
+                                    html.Div([
+                                        html.Label("Enter Coordinates (optional):", style={
+                                            'fontWeight': 'bold',
+                                            'marginBottom': '5px',
+                                            'display': 'block',
+                                            'fontSize': '16px'
+                                        }),
+                                        html.Div([
+                                            dcc.Input(
+                                                id='latitude-input',
+                                                type='number',
+                                                placeholder='Latitude',
+                                                step=0.01,
+                                                style={
+                                                    'width': '48%',
+                                                    'marginRight': '4%',
+                                                    'height': '24px',
+                                                    'fontSize': '14px',
+                                                    'padding': '4px 8px'
+                                                }
+                                            ),
+                                            dcc.Input(
+                                                id='longitude-input',
+                                                type='number',
+                                                placeholder='Longitude',
+                                                step=0.01,
+                                                style={
+                                                    'width': '48%',
+                                                    'height': '24px',
+                                                    'fontSize': '14px',
+                                                    'padding': '4px 8px'
+                                                }
+                                            ),
+                                        ], style={'display': 'flex', 'marginBottom': '10px'}),
+                                        html.Button('Find Closest Point', id='find-point-button', n_clicks=0,
+                                                    style={'width': '100%', 'padding': '8px', 'backgroundColor': '#3498db',
+                                                          'color': 'white', 'border': 'none', 'borderRadius': '4px',
+                                                          'cursor': 'pointer', 'marginBottom': '15px'}),
+                                    ]),
+
+                                    # Cost selector
+                                    html.Div([
+                                        html.Label(f"Cost Filter (Min={min_cost_value:.3f}/Max={max_cost_value:.3f}):",
+                                                  style={
+                                                      'fontWeight': 'bold',
+                                                      'marginBottom': '5px',
+                                                      'display': 'block',
+                                                      'fontSize': '15px'
+                                                    }),
+                                        html.Div([
+                                            dcc.Input(
+                                                id='cost-input',
+                                                type='number',
+                                                min=0,
+                                                max=max_cost_value,
+                                                value=max_cost_value,
+                                                step=0.1,
+                                                style={
+                                                    'width': '65%',
+                                                    'height': '24px',
+                                                    'fontSize': '12px',
+                                                    'marginRight': '5%'
+                                                }
+                                            ),
+                                            html.Button('Apply', id='apply-cost-button', n_clicks=0,
+                                                        style={'width': '30%', 'padding': '8px', 'backgroundColor': '#27ae60',
+                                                              'color': 'white', 'border': 'none', 'borderRadius': '4px',
+                                                              'cursor': 'pointer'}),
+                                        ], style={'display': 'flex', 'marginBottom': '30px'}),
+                                        html.Div(id='cost-input-message', style={'fontSize': '12px', 'color': '#7f8c8d'}),
+                                    ]),
+
+                                    # Export buttons
+                                    html.Div([
+                                        html.Button('Export PNG', id='export-button', n_clicks=0,
+                                                    style={'width': '48%', 'marginRight': '4%', 'padding': '10px',
+                                                          'backgroundColor': '#e74c3c', 'color': 'white', 'border': 'none',
+                                                          'borderRadius': '4px', 'cursor': 'pointer'}),
+                                        html.Button('Export KML', id='export-kml-button', n_clicks=0,
+                                                    style={'width': '48%', 'padding': '10px', 'backgroundColor': '#9b59b6',
+                                                          'color': 'white', 'border': 'none', 'borderRadius': '4px',
+                                                          'cursor': 'pointer'}),
+                                    ], style={'display': 'flex', 'marginBottom': '5px'}),
+
+                                    html.Div(id='export-status', style={'fontSize': '12px', 'color': '#7f8c8d', 'minHeight': '10px'}),
+
+                                ], style={
+                                    'padding': '15px',
+                                    'border': '1px solid #bdc3c7',
+                                    'borderRadius': '5px',
+                                    'backgroundColor': '#ffffff',
+                                    'marginBottom': '5px'
+                                }),
+
+                                # Clicked point properties section
+                                html.Div([
+                                    html.H3("Selected Point Properties", style={
+                                        'margin': '0 0 15px 0',
+                                        'color': '#34495e',
+                                        'fontSize': '18px',
+                                        'textDecoration': 'underline',
+                                        'display': 'inline-block'
+                                    }),
+                                    html.Div(id='click-info', style={'marginBottom': '15px', 'fontSize': '14px'}),
+                                    html.Div(id='panel-properties-table', style={'maxHeight': '400px', 'overflowY': 'auto'}),
+                                ], style={
+                                    'padding': '15px',
+                                    'border': '1px solid #bdc3c7',
+                                    'borderRadius': '5px',
+                                    'backgroundColor': '#ffffff'
+                                }),
+
+                            ], style={
+                                'flex': '0 0 25%',  # Fixed width, no grow/shrink
+                                'marginRight': '1%'
                             }),
 
-                            # File selector
+                            # MIDDLE COLUMN - Scatter Plot
                             html.Div([
-                                html.Label("Select File:", style={
-                                    'fontWeight': 'bold',
-                                    'marginBottom': '5px',
-                                    'display': 'block',
-                                    'fontSize': '16px'
-                                }),
-                                dcc.Dropdown(
-                                    id='file-selector',
-                                    options=file_options,
-                                    value=initial_file_path,
-                                    style={
-                                        'marginBottom': '15px',
-                                        'fontSize': '12px'
-                                    }
+                                dcc.Graph(
+                                    id='aerosol-plot',
+                                    figure=create_scatter_plot_only(filtered_data, default_var, original_indices),
+                                    style={'height': '800px', 'border': '1px solid #bdc3c7', 'borderRadius': '5px'}
                                 ),
-                            ]),
-
-                            # Aerosol property selector
-                            html.Div([
-                                html.Label("Select Retrieval Property:", style={
-                                    'fontWeight': 'bold',
-                                    'marginBottom': '5px',
-                                    'display': 'block',
-                                    'fontSize': '16px'
-                                }),
-                                dcc.Dropdown(
-                                    id='property-selector',
-                                    options=dropdown_options,
-                                    value=default_var,
-                                    style={
-                                        'marginBottom': '25px',
-                                        'height': '24px',
-                                        'fontSize': '16px'
-                                    }
-                                ),
-                            ]),
-
-                            # Lat/Lon inputs
-                            html.Div([
-                                html.Label("Enter Coordinates (optional):", style={
-                                    'fontWeight': 'bold',
-                                    'marginBottom': '5px',
-                                    'display': 'block',
-                                    'fontSize': '16px'
-                                }),
-                                html.Div([
-                                    dcc.Input(
-                                        id='latitude-input',
-                                        type='number',
-                                        placeholder='Latitude',
-                                        step=0.01,
-                                        style={
-                                            'width': '48%',
-                                            'marginRight': '4%',
-                                            'height': '24px',
-                                            'fontSize': '14px',
-                                            'padding': '4px 8px'  # internal padding (vert, horiz)
-                                        }
-                                    ),
-                                    dcc.Input(
-                                        id='longitude-input',
-                                        type='number',
-                                        placeholder='Longitude',
-                                        step=0.01,
-                                        style={
-                                            'width': '48%',
-                                            'height': '24px',
-                                            'fontSize': '14px',
-                                            'padding': '4px 8px'  # internal padding (vert, horiz)
-                                        }
-                                    ),
-                                ], style={'display': 'flex', 'marginBottom': '10px'}),
-                                html.Button('Find Closest Point', id='find-point-button', n_clicks=0,
-                                            style={'width': '100%', 'padding': '8px', 'backgroundColor': '#3498db',
-                                                   'color': 'white', 'border': 'none', 'borderRadius': '4px',
-                                                   'cursor': 'pointer', 'marginBottom': '15px'}),
-                            ]),
-
-                            # Cost selector
-                            html.Div([
-                                html.Label(f"Cost Filter (Min={min_cost_value:.3f}/Max={max_cost_value:.3f}):",
-                                           style={
-                                               'fontWeight': 'bold',
-                                               'marginBottom': '5px',
-                                               'display': 'block',
-                                               'fontSize': '15px'
-                                            }),
-                                html.Div([
-                                    dcc.Input(
-                                        id='cost-input',
-                                        type='number',
-                                        min=0,
-                                        max=max_cost_value,
-                                        value=max_cost_value,
-                                        step=0.1,
-                                        style={
-                                            'width': '65%',
-                                            'height': '24px',
-                                            'fontSize': '12px',
-                                            'marginRight': '5%'  # internal padding (vert, horiz)
-                                        }
-                                    ),
-                                    html.Button('Apply', id='apply-cost-button', n_clicks=0,
-                                                style={'width': '30%', 'padding': '8px', 'backgroundColor': '#27ae60',
-                                                       'color': 'white', 'border': 'none', 'borderRadius': '4px',
-                                                       'cursor': 'pointer'}),
-                                ], style={'display': 'flex', 'marginBottom': '30px'}),
-                                html.Div(id='cost-input-message', style={'fontSize': '12px', 'color': '#7f8c8d'}),
-                            ]),
-
-                            # Export buttons
-                            html.Div([
-                                html.Button('Export PNG', id='export-button', n_clicks=0,
-                                            style={'width': '48%', 'marginRight': '4%', 'padding': '10px',
-                                                   'backgroundColor': '#e74c3c', 'color': 'white', 'border': 'none',
-                                                   'borderRadius': '4px', 'cursor': 'pointer'}),
-                                html.Button('Export KML', id='export-kml-button', n_clicks=0,
-                                            style={'width': '48%', 'padding': '10px', 'backgroundColor': '#9b59b6',
-                                                   'color': 'white', 'border': 'none', 'borderRadius': '4px',
-                                                   'cursor': 'pointer'}),
-                            ], style={'display': 'flex', 'marginBottom': '5px'}),
-
-                            html.Div(id='export-status', style={'fontSize': '12px', 'color': '#7f8c8d', 'minHeight': '10px'}),
-
-                        ], style={
-                            'padding': '15px',
-                            'border': '1px solid #bdc3c7',
-                            'borderRadius': '5px',
-                            'backgroundColor': '#ffffff',
-                            'marginBottom': '5px'
-                        }),
-
-                        # Clicked point properties section
-                        html.Div([
-                            html.H3("Selected Point Properties", style={
-                                'margin': '0 0 15px 0',
-                                'color': '#34495e',
-                                'fontSize': '18px',
-                                'textDecoration': 'underline',
-                                'display': 'inline-block'
+                            ], style={
+                                'flex': '0 0 31%',  # Back to original size
+                                'marginRight': '1%'
                             }),
-                            html.Div(id='click-info', style={'marginBottom': '15px', 'fontSize': '14px'}),
-                            html.Div(id='panel-properties-table', style={'maxHeight': '400px', 'overflowY': 'auto'}),
+
+                            # RIGHT COLUMN - Combined Intensity and DoLP plot
+                            html.Div([
+                                # Single combined plot with both intensity and DoLP as subplots
+                                html.Div([
+                                    dcc.Graph(
+                                        id='combined-plot',
+                                        style={'height': '800px', 'border': '1px solid #bdc3c7', 'borderRadius': '5px'}  # Full height
+                                    ),
+                                ]),
+
+                            ], style={
+                                'flex': '0 0 42%'
+                            }),
                         ], style={
-                            'padding': '15px',
-                            'border': '1px solid #bdc3c7',
-                            'borderRadius': '5px',
-                            'backgroundColor': '#ffffff'
+                            'display': 'flex',
+                            'flexDirection': 'row',
+                            'padding': '0 20px',
+                            'gap': '0px'  # No gap since we're using margins
                         }),
+                    ]),
 
-                    ], style={
-                        'flex': '0 0 25%',  # Fixed width, no grow/shrink
-                        'marginRight': '1%'
-                    }),
-
-                    # MIDDLE COLUMN - Scatter Plot
-                    html.Div([
-                        dcc.Graph(
-                            id='aerosol-plot',
-                            figure=create_scatter_plot_only(filtered_data, default_var, original_indices),
-                            style={'height': '800px', 'border': '1px solid #bdc3c7', 'borderRadius': '5px'}
-                        ),
-                    ], style={
-                        'flex': '0 0 31%',  # Back to original size
-                        'marginRight': '1%'
-                    }),
-
-                    # RIGHT COLUMN - Combined Intensity and DoLP plot
-                    html.Div([
-                        # Single combined plot with both intensity and DoLP as subplots
+                    # Residual Tab
+                    dcc.Tab(label='Residual', value='tab-residual', children=[
                         html.Div([
-                            dcc.Graph(
-                                id='combined-plot',
-                                style={'height': '800px', 'border': '1px solid #bdc3c7', 'borderRadius': '5px'}  # Full height
-                            ),
-                        ]),
+                            # LEFT COLUMN - Controls
+                            html.Div([
+                                # Controls section
+                                html.Div([
+                                    html.H3("Residual Controls", style={
+                                        'margin': '0 0 10px 0',
+                                        'color': '#34495e',
+                                        'fontSize': '18px',
+                                        'textDecoration': 'underline',
+                                        'display': 'inline-block'
+                                    }),
 
-                    ], style={
-                        'flex': '0 0 42%'
-                    }),
-                ], style={
-                    'display': 'flex',
-                    'flexDirection': 'row',
-                    'padding': '0 20px',
-                    'gap': '0px'  # No gap since we're using margins
-                }),
+                                    # File selector (reusing the same ID will keep it synced with Individual tab)
+                                    html.Div([
+                                        html.Label("Select File:", style={
+                                            'fontWeight': 'bold',
+                                            'marginBottom': '5px',
+                                            'display': 'block',
+                                            'fontSize': '16px'
+                                        }),
+                                        dcc.Dropdown(
+                                            id='residual-file-selector',
+                                            options=file_options,
+                                            value=initial_file_path,
+                                            style={
+                                                'marginBottom': '15px',
+                                                'fontSize': '12px'
+                                            }
+                                        ),
+                                    ]),
 
+                                    # Add residual-specific controls here
+                                    html.Div([
+                                        html.Label("Select Residual Type:", style={
+                                            'fontWeight': 'bold',
+                                            'marginBottom': '5px',
+                                            'display': 'block',
+                                            'fontSize': '16px'
+                                        }),
+                                        dcc.Dropdown(
+                                          id='residual-type-selector',
+                                          options=[
+                                              {'label': 'Intensity Residual', 'value': 'intensity'},
+                                              {'label': 'DoLP Residual', 'value': 'dolp'},
+                                              {'label': 'Both Residuals', 'value': 'both'}
+                                          ],
+                                          value='both',  # picks both as a defulat
+                                          style={
+                                              'marginBottom': '25px',
+                                              'height': '24px',
+                                              'fontSize': '16px'
+                                          }
+                                        ),
+                                    ]),
+
+                                ], style={
+                                    'padding': '15px',
+                                    'border': '1px solid #bdc3c7',
+                                    'borderRadius': '5px',
+                                    'backgroundColor': '#ffffff',
+                                    'marginBottom': '15px'
+                                }),
+
+                                # Table copied from Individual tab
+                                html.Div([
+                                    html.H3("Selected Point Data", style={
+                                        'margin': '0 0 15px 0',
+                                        'color': '#34495e',
+                                        'fontSize': '18px',
+                                        'textDecoration': 'underline',
+                                        'display': 'inline-block'
+                                    }),
+                                    html.Div(id='residual-click-info', style={'marginBottom': '15px', 'fontSize': '14px'}),
+                                    html.Div(id='residual-panel-properties-table', style={'maxHeight': '400px', 'overflowY': 'auto'}),
+                                ], style={
+                                    'padding': '15px',
+                                    'border': '1px solid #bdc3c7',
+                                    'borderRadius': '5px',
+                                    'backgroundColor': '#ffffff'
+                                }),
+
+                            ], style={
+                                'flex': '0 0 25%',  # Fixed width, no grow/shrink
+                                'marginRight': '1%'
+                            }),
+
+                            # RIGHT COLUMN - Residual plot area (occupying both middle and right columns space)
+                            html.Div([
+                                dcc.Graph(
+                                    id='residual-plot',
+                                    style={'height': '800px', 'border': '1px solid #bdc3c7', 'borderRadius': '5px'}
+                                ),
+                            ], style={
+                                'flex': '0 0 74%'  # Combined size of middle and right columns
+                            }),
+                        ], style={
+                            'display': 'flex',
+                            'flexDirection': 'row',
+                            'padding': '0 20px',
+                            'gap': '0px'
+                        }),
+                    ]),
+                    # Histogram Tab
+                    dcc.Tab(label='Histogram', value='tab-histogram', children=[
+                      html.Div([
+                          html.H2("AOD Frequency Distribution",
+                                  style={'textAlign': 'center', 'marginBottom': '20px'}),
+
+                          html.Div([
+                              html.P([
+                                  "This histogram shows the frequency distribution of AOD values for the selected property and cost filter. ",
+                                  "Use the controls in the Individual visualization tab to select different wavelengths and adjust the cost threshold."
+                              ], style={'textAlign': 'center', 'marginBottom': '20px', 'fontSize': '14px'}),
+
+                              dcc.Graph(
+                                  id='aod-histogram',
+                                  config={
+                                      'displayModeBar': True,
+                                      'displaylogo': False,
+                                      'modeBarButtonsToRemove': ['lasso2d', 'select2d']
+                                  }
+                              )
+                          ], style={'padding': '0 20px'})
+
+                      ], style={'padding': '20px'})
+                  ]),
+                ]),
             ], style={'backgroundColor': '#ecf0f1', 'minHeight': '100vh', 'padding': '20px 0'})
             # END of APP LAYOUT
 
+
             # Begin Callbacks
+            # AOD HISTOGRAM CALLBACKS
+            @app.callback(
+              Output('aod-histogram', 'figure'),
+              [Input('property-selector', 'value'),
+              Input('cost-input', 'value'),
+              Input('current-file-data', 'data')]
+              )
+
+            def update_histogram(selected_property, max_cost, current_file_data):
+                """
+                Update histogram based on selected property and cost threshold
+                """
+
+                # Check if we have valid inputs
+                if current_file_data is None or selected_property is None:
+                    empty_fig = go.Figure()
+                    empty_fig.add_annotation(
+                        text="No data available - please select a file and property in the main visualization tab",
+                        x=0.5, y=0.5,
+                        xref="paper", yref="paper",
+                        showarrow=False,
+                        font=dict(size=16)
+                    )
+                    empty_fig.update_layout(
+                        title="AOD Frequency Histogram",
+                        xaxis_title="AOD Value",
+                        yaxis_title="Frequency",
+                        height=500
+                    )
+                    return empty_fig
+
+                # Get current file path and read
+                file_path = current_file_data.get('file_path')
+                if file_path is None:
+                    empty_fig = go.Figure()
+                    empty_fig.add_annotation(
+                        text="No file path found",
+                        x=0.5, y=0.5,
+                        xref="paper", yref="paper",
+                        showarrow=False,
+                        font=dict(size=16)
+                    )
+                    return empty_fig
+
+                try:
+                    # Read data from current file path
+                    data_dict, sorted_variables, display_names, variable_metadata = read_hdf5_variables(file_path)
+
+                    # Use 200 as a default max cost if not given
+                    if max_cost is None:
+                        max_cost = current_file_data.get('max_cost_value', 200.0)
+
+                    # Check if selected property contains "optical_depth"
+                    if 'optical_depth' not in selected_property.lower():
+                        fig = go.Figure()
+                        fig.add_annotation(
+                            text=f"Histogram is only available for AOD (optical depth) properties.<br>Selected: {selected_property}",
+                            x=0.5, y=0.5,
+                            xref="paper", yref="paper",
+                            showarrow=False,
+                            font=dict(size=16)
+                        )
+                        fig.update_layout(
+                            title="AOD Frequency Histogram",
+                            xaxis_title="AOD Value",
+                            yaxis_title="Frequency",
+                            height=500
+                        )
+                        return fig
+
+                    # Create the histogram
+                    histogram_fig = create_aod_histogram(data_dict, selected_property, max_cost)
+                    return histogram_fig
+
+                except Exception as e:
+                    print(f"Error creating histogram: {e}")
+                    error_fig = go.Figure()
+                    error_fig.add_annotation(
+                        text=f"Error loading histogram data: {str(e)}",
+                        x=0.5, y=0.5,
+                        xref="paper", yref="paper",
+                        showarrow=False,
+                        font=dict(size=16)
+                    )
+                    error_fig.update_layout(
+                        title="AOD Frequency Histogram",
+                        xaxis_title="AOD Value",
+                        yaxis_title="Frequency",
+                        height=500
+                    )
+                    return error_fig
+
+            # RESIDUAL PLOT CALLBACKS
+            # Callback to update the residual-panel-properties-table based on clicked poin
+            @app.callback(
+                Output('residual-panel-properties-table', 'children'),
+                Input('panel-properties-table', 'children'),
+                Input('clicked-point-store', 'data'),
+                Input('visualization-tabs', 'value')
+              )
+            def update_residual_panel_properties(properties_table_content, clicked_data, active_tab):
+                # Empty if not on residual tab
+                if active_tab != 'tab-residual':
+                  return []
+
+                # If no point clicked yet
+                if clicked_data is None:
+                    return html.Div("Click on a point in the Individual tab to see properties")
+
+                # Use the same table as the one in the main visualization
+                return properties_table_content
+
+            # Callack to update the residual plot with current one
+            @app.callback(
+                Output('residual-plot', 'figure'),
+                [Input('residual-file-selector', 'value'),
+                Input('residual-type-selector', 'value'),
+                Input('clicked-point-store', 'data'),
+                Input('visualization-tabs', 'value')]
+            )
+            def update_residual_plot(file_path, residual_type, clicked_data, active_tab):
+                """
+                Updated callback for residual plot that uses actual data
+                """
+                if active_tab != 'tab-residual':
+                    # Return empty figure when not on residual tab
+                    return go.Figure()
+
+                # Check if we have a selected point
+                if clicked_data is None:
+                    fig = go.Figure()
+                    fig.add_annotation(
+                        text="Click on a point in the Individual tab to see residuals",
+                        xref="paper", yref="paper",
+                        x=0.5, y=0.5,
+                        showarrow=False,
+                        font=dict(size=16, color="#7f8c8d")
+                    )
+                    fig.update_layout(
+                        title="Residual Analysis",
+                        xaxis_title="Viewing Zenith Angle (degrees)",
+                        yaxis_title="Residual Value",
+                        height=800,
+                        margin=dict(l=50, r=40, t=60, b=40)
+                    )
+                    return fig
+
+                # Get the selected point data
+                selected_row = clicked_data.get('row')
+                selected_col = clicked_data.get('col')
+
+                if selected_row is None or selected_col is None:
+                    fig = go.Figure()
+                    fig.add_annotation(
+                        text="Invalid point used! Please select a point again.",
+                        xref="paper", yref="paper",
+                        x=0.5, y=0.5,
+                        showarrow=False,
+                        font=dict(size=16, color="red")
+                    )
+                    return fig
+
+                # Load the data for the current file
+                try:
+                    data_dict, _, _, _ = read_hdf5_variables(file_path)
+                except Exception as e:
+                    fig = go.Figure()
+                    fig.add_annotation(
+                        text=f"Error loading data: {str(e)}",
+                        xref="paper", yref="paper",
+                        x=0.5, y=0.5,
+                        showarrow=False,
+                        font=dict(size=16, color="red")
+                    )
+                    return fig
+
+                # Create the residual graph based on what variable is selected
+                if residual_type == 'intensity':
+                    return create_residual_plot(data_dict, selected_row, selected_col, 'intensity')
+                elif residual_type == 'dolp':
+                    return create_residual_plot(data_dict, selected_row, selected_col, 'dolp')
+                else:
+                    return create_residual_plot(data_dict, selected_row, selected_col, 'both')
+
+            # SYNCING POINT TABLE CALLBACKS
+            # Callback to update residual-click-info with the same data as click-info
+            @app.callback(
+                Output('residual-click-info', 'children'),
+                Input('click-info', 'children')
+            )
+            def sync_click_info(click_info_content):
+                return click_info_content
+
+            # TAB CALLBACKS
+            # Keep file selector the same for both pages so that they are synced
+            @app.callback(
+                Output('residual-file-selector', 'value'),
+                Input('file-selector', 'value')
+            )
+            def sync_file_selectors(file_selector_value):
+                return file_selector_value
+
             # 1. DATA/FILE MANAGEMENT CALLBACKS (highest level)
             # File selector callback
             @app.callback(
@@ -2574,7 +3227,7 @@ def run_app(initial_file_path, directory_path):
                 )
                 # add pre click annotations
                 combined_fig.add_annotation(
-                    text="Click a point on the map to view Intensity and DoLP plots", 
+                    text="Click a point on the map to view Intensity and DoLP plots",
                     xref="x", yref="y",
                     x=2.5, y=1.5,
                     showarrow=False,
@@ -2754,6 +3407,7 @@ def run_app(initial_file_path, directory_path):
 
     except Exception as e:
         print(f"Error setting up application: {str(e)}")
+
 
 
 # Run the application

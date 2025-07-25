@@ -3262,6 +3262,9 @@ def run_app(initial_file_path, directory_path):
                     selected_col = clicked_point_data['col']
                     lat = data_dict['latitude'][selected_row, selected_col]
                     lon = data_dict['longitude'][selected_row, selected_col]
+                    sza = data_dict['sza'][selected_row, selected_col]
+                    raa = data_dict['raa'][selected_row, selected_col]
+                    
 
                     if filtered_data[selected_property].ndim == 2:
                         val = filtered_data[selected_property][selected_row, selected_col]
@@ -3277,6 +3280,10 @@ def run_app(initial_file_path, directory_path):
 
                     click_info = html.Div([
                         html.Strong("Location: "), f"Lat {lat:.4f}°, Lon {lon:.4f}°",
+                        html.Br(),
+                        html.Strong("SZA: "), f"{sza[0]:.3f}",
+                        html.Br(),
+                        html.Strong("RAA: "), f"{raa[0]:.3f}",
                         html.Br(),
                         html.Strong("Selected: "), f"{selected_property} = {val:.3f}",
                         html.Br(),

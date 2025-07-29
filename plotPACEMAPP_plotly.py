@@ -1599,6 +1599,93 @@ def create_aod_histogram(data_dict, selected_property, max_cost, bin_size=0.1):
 
     return fig
 
+def create_polarized_reflectance_plot(intensity_data, dolp_data, wavelengths, wl_colors):
+    """
+    Create a plot showing polarized reflectance (DoLP × Intensity) vs VZA
+    with both measured and modeled data
+    """
+    
+    DEBUG_PLOTTING = True
+    
+    # Create single plot
+    fig = go.Figure()
+    
+    # Calculate polarized reflectance for each wavelength
+    for wl in wavelengths:
+        name = f'{wl} nm'
+        
+        # Calculate polarized reflectance - measured data
+        min_len_meas = min(len(intensity_data[wl]['y_meas']), len(dolp_data[wl]['y_meas']))
+        x_meas = intensity_data[wl]['x'][:min_len_meas]
+        polarized_refl_meas = (
+            np.array(intensity_data[wl]['y_meas'][:min_len_meas]) * 
+            np.array(dolp_data[wl]['y_meas'][:min_len_meas])
+        )
+        
+        # Calculate polarized reflectance - modeled data
+        min_len_model = min(len(intensity_data[wl]['y_model']), len(dolp_data[wl]['y_model']))
+        x_model = intensity_data[wl]['x'][:min_len_model]
+        polarized_refl_model = (
+            np.array(intensity_data[wl]['y_model'][:min_len_model]) * 
+            np.array(dolp_data[wl]['y_model'][:min_len_model])
+        )
+        
+        # Add measured polarized reflectance trace
+        fig.add_trace(
+            go.Scatter(
+                x=x_meas,
+                y=polarized_refl_meas,
+                mode='markers+lines',
+                name=f'Measured {name}',
+                line=dict(color=wl_colors[wl], width=2),
+                marker=dict(color=wl_colors[wl], size=6),
+                legendgroup=f'wl{wl}',
+                showlegend=True
+            )
+        )
+        
+        # Add modeled polarized reflectance trace
+        fig.add_trace(
+            go.Scatter(
+                x=x_model,
+                y=polarized_refl_model,
+                mode='lines',
+                name=f'Model {name}',
+                line=dict(color=wl_colors[wl], width=2, dash='dash'),
+                legendgroup=f'wl{wl}',
+                showlegend=True
+            )
+        )
+        
+    
+    # Update layout
+    fig.update_layout(
+        title="Polarized Reflectance (DoLP × Intensity) vs Viewing Zenith Angle",
+        xaxis_title="Viewing Zenith Angle (degrees)",
+        yaxis_title="Polarized Reflectance (DoLP × Intensity)",
+        height=800,
+        showlegend=True,
+        margin=dict(l=50, r=40, t=60, b=40),
+        legend=dict(
+            orientation="v",
+            yanchor="top",
+            y=1,
+            xanchor="left",
+            x=1.02,
+            bgcolor="rgba(255,255,255,0.9)",
+            bordercolor="rgba(0,0,0,0.3)",
+            borderwidth=1,
+            title=dict(
+                text="<b>Wavelengths</b><br>(— Solid: Measured, - - Dashed: Modeled)",
+                font=dict(size=12, family="Arial", color="black"),
+                side="top"
+            )
+        ),
+        autosize=True
+    )
+    
+    return fig
+
 # =============================================================================
 # EXPORT FUNCTIONS
 # =============================================================================
@@ -2643,6 +2730,79 @@ def run_app(initial_file_path, directory_path):
                         }),
                     ]),
 
+                    # Polarized Reflectance Tab
+                    dcc.Tab(label='Polarized Reflectance', value='tab-polarized-reflectance', children=[
+                        html.Div([
+                            # LEFT COLUMN - Just info and properties table (no controls)
+                            html.Div([
+                                # Info section
+                                html.Div([
+                                    html.H3("Polarized Reflectance", style={
+                                        'margin': '0 0 10px 0',
+                                        'color': '#34495e',
+                                        'fontSize': '18px',
+                                        'textDecoration': 'underline',
+                                        'display': 'inline-block'
+                                    }),
+                                    
+                                    html.Div([
+                                        html.P("Polarized Reflectance = DoLP × Intensity, based on the point selected in the Individual tab.", style={
+                                            'fontSize': '12px',
+                                            'color': '#95a5a6',
+                                            'marginBottom': '0px'
+                                        })
+                                    ]),
+                                    
+                                ], style={
+                                    'padding': '15px',
+                                    'border': '1px solid #bdc3c7',
+                                    'borderRadius': '5px',
+                                    'backgroundColor': '#ffffff',
+                                    'marginBottom': '15px'
+                                }),
+
+                                # Selected point properties section (synced from Individual tab)
+                                html.Div([
+                                    html.H3("Selected Point Data", style={
+                                        'margin': '0 0 15px 0',
+                                        'color': '#34495e',
+                                        'fontSize': '18px',
+                                        'textDecoration': 'underline',
+                                        'display': 'inline-block'
+                                    }),
+                                    html.Div(id='polarized-click-info', style={'marginBottom': '15px', 'fontSize': '14px'}),
+                                    html.Div(id='polarized-panel-properties-table', style={'maxHeight': '400px', 'overflowY': 'auto'}),
+                                ], style={
+                                    'padding': '15px',
+                                    'border': '1px solid #bdc3c7',
+                                    'borderRadius': '5px',
+                                    'backgroundColor': '#ffffff'
+                                }),
+
+                            ], style={
+                                'flex': '0 0 25%',
+                                'marginRight': '1%'
+                            }),
+
+                            # RIGHT COLUMN - Polarized Reflectance plot (taking up the space of middle + right)
+                            html.Div([
+                                dcc.Graph(
+                                    id='polarized-reflectance-plot',
+                                    style={'height': '800px', 'border': '1px solid #bdc3c7', 'borderRadius': '5px'}
+                                ),
+                            ], style={
+                                'flex': '0 0 74%'  # Combined size of middle and right columns like residual tab
+                            }),
+                            
+                        ], style={
+                            'display': 'flex',
+                            'flexDirection': 'row',
+                            'padding': '0 20px',
+                            'gap': '0px'
+                        }),
+                    ]),
+
+
                     # Residual Tab
                     dcc.Tab(label='Residual', value='tab-residual', children=[
                         html.Div([
@@ -2869,6 +3029,125 @@ def run_app(initial_file_path, directory_path):
                         height=500
                     )
                     return error_fig
+            
+            # POLARIZED REFLECTANCE PLOT CALLBACKS
+            # Callback to update the polarized-panel-properties-table based on clicked point
+            @app.callback(
+                Output('polarized-panel-properties-table', 'children'),
+                Input('panel-properties-table', 'children'),
+                Input('clicked-point-store', 'data'),
+                Input('visualization-tabs', 'value')
+            )
+            def update_polarized_panel_properties(properties_table_content, clicked_data, active_tab):
+                # Empty if not on polarized reflectance tab
+                if active_tab != 'tab-polarized-reflectance':
+                    return []
+
+                # If no point clicked yet
+                if clicked_data is None:
+                    return html.Div("Click on a point in the Individual tab to see properties")
+
+                # Use the same table as the one in the main visualization
+                return properties_table_content
+
+            # Callback to update the polarized plot
+            @app.callback(
+                Output('polarized-reflectance-plot', 'figure'),
+                [Input('file-selector', 'value'),
+                Input('clicked-point-store', 'data'),
+                Input('visualization-tabs', 'value')]
+            )
+            def update_polarized_reflectance_plot(file_path, clicked_data, active_tab):
+                """
+                Updated callback for polarized reflectance plot that uses actual data
+                """
+                if active_tab != 'tab-polarized-reflectance':
+                    # Empty figure
+                    return go.Figure()
+
+                # Check if we have a selected point
+                if clicked_data is None:
+                    fig = go.Figure()
+                    fig.add_annotation(
+                        text="Click on a point in the Individual tab to see polarized reflectance",
+                        xref="paper", yref="paper",
+                        x=0.5, y=0.5,
+                        showarrow=False,
+                        font=dict(size=16, color="#7f8c8d")
+                    )
+                    fig.update_layout(
+                        title="Polarized Reflectance Analysis",
+                        xaxis_title="Viewing Zenith Angle (degrees)",
+                        yaxis_title="Polarized Reflectance (DoLP × Intensity)",
+                        height=800,
+                        margin=dict(l=50, r=40, t=60, b=40)
+                    )
+                    return fig
+
+                # Get the selected point data
+                selected_row = clicked_data.get('row')
+                selected_col = clicked_data.get('col')
+
+                if selected_row is None or selected_col is None:
+                    fig = go.Figure()
+                    fig.add_annotation(
+                        text="Invalid point used! Please select a point again.",
+                        xref="paper", yref="paper",
+                        x=0.5, y=0.5,
+                        showarrow=False,
+                        font=dict(size=16, color="red")
+                    )
+                    return fig
+
+                # Load the data for the current file
+                try:
+                    data_dict, _, _, _ = read_hdf5_variables(file_path)
+                except Exception as e:
+                    fig = go.Figure()
+                    fig.add_annotation(
+                        text=f"Error loading data: {str(e)}",
+                        xref="paper", yref="paper",
+                        x=0.5, y=0.5,
+                        showarrow=False,
+                        font=dict(size=16, color="red")
+                    )
+                    return fig
+
+                # Create the polarized reflectance plot
+                try:
+                    # Use the same function as residual plot
+                    intensity_data, dolp_data, wavelengths = get_channel_intensity_dolp_vza(
+                        data_dict, selected_row, selected_col
+                    )
+                    wl_colors = generate_wavelength_colors(wavelengths)
+                    
+                    return create_polarized_reflectance_plot(intensity_data, dolp_data, wavelengths, wl_colors)
+                    
+                except Exception as e:
+                    fig = go.Figure()
+                    fig.add_annotation(
+                        text=f"Error creating polarized reflectance plot: {str(e)}",
+                        xref="paper", yref="paper",
+                        x=0.5, y=0.5,
+                        showarrow=False,
+                        font=dict(size=16, color="red")
+                    )
+                    fig.update_layout(
+                        title="Polarized Reflectance Analysis - Error",
+                        xaxis_title="Viewing Zenith Angle (degrees)",
+                        yaxis_title="Polarized Reflectance (DoLP × Intensity)",
+                        height=800
+                    )
+                    return fig
+
+            # SYNCING POINT TABLE CALLBACKS
+            # Callback to update polarized-click-info with the same data as click-info
+            @app.callback(
+                Output('polarized-click-info', 'children'),
+                Input('click-info', 'children')
+            )
+            def sync_polarized_click_info(click_info_content):
+                return click_info_content
 
             # RESIDUAL PLOT CALLBACKS
             # Callback to update the residual-panel-properties-table based on clicked poin

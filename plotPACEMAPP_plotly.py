@@ -2991,22 +2991,22 @@ def run_app(initial_file_path, directory_path):
                         max_cost = current_file_data.get('max_cost_value', 200.0)
 
                     # Check if selected property contains "optical_depth"
-                    if 'optical_depth' not in selected_property.lower():
-                        fig = go.Figure()
-                        fig.add_annotation(
-                            text=f"Histogram is only available for AOD (optical depth) properties.<br>Selected: {selected_property}",
-                            x=0.5, y=0.5,
-                            xref="paper", yref="paper",
-                            showarrow=False,
-                            font=dict(size=16)
-                        )
-                        fig.update_layout(
-                            title="AOD Frequency Histogram",
-                            xaxis_title="AOD Value",
-                            yaxis_title="Frequency",
-                            height=500
-                        )
-                        return fig
+                    # if 'optical_depth' not in selected_property.lower():
+                    #     fig = go.Figure()
+                    #     fig.add_annotation(
+                    #         text=f"Histogram is only available for AOD (optical depth) properties.<br>Selected: {selected_property}",
+                    #         x=0.5, y=0.5,
+                    #         xref="paper", yref="paper",
+                    #         showarrow=False,
+                    #         font=dict(size=16)
+                    #     )
+                    #     fig.update_layout(
+                    #         title="AOD Frequency Histogram",
+                    #         xaxis_title="AOD Value",
+                    #         yaxis_title="Frequency",
+                    #         height=500
+                    #     )
+                    #     return fig
 
                     # Create the histogram
                     histogram_fig = create_aod_histogram(data_dict, selected_property, max_cost)

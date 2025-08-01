@@ -2520,7 +2520,7 @@ def run_app(initial_file_path, directory_path):
                             # 'backgroundColor': ''
                             # 'minHeight': '800px'
                         }),
-                        html.P("TThis Python application creates an interactive web-based visualization tool for exploring atmospheric aerosol properties from PACE (Plankton, Aerosol, Cloud, ocean Ecosystem). PACE intstruments are HARP2 (polarimeter), SPEXone (polarimeter), and OCI and the Microphysical Aerosol Properties from Polarimetry (MAPP) retrieval framework (Stamnes et al., 2023).", style={'textAlign': 'center'})
+                        html.P("This Python application creates an interactive web-based visualization tool for exploring atmospheric aerosol properties from PACE (Plankton, Aerosol, Cloud, ocean Ecosystem). PACE intstruments are HARP2 (polarimeter), SPEXone (polarimeter), and OCI and the Microphysical Aerosol Properties from Polarimetry (MAPP) retrieval framework (Stamnes et al., 2023).", style={'textAlign': 'center'})
                     ]),
 
                     # Individual Tab
@@ -2989,25 +2989,7 @@ def run_app(initial_file_path, directory_path):
                     # Use 200 as a default max cost if not given
                     if max_cost is None:
                         max_cost = current_file_data.get('max_cost_value', 200.0)
-
-                    # Check if selected property contains "optical_depth"
-                    # if 'optical_depth' not in selected_property.lower():
-                    #     fig = go.Figure()
-                    #     fig.add_annotation(
-                    #         text=f"Histogram is only available for AOD (optical depth) properties.<br>Selected: {selected_property}",
-                    #         x=0.5, y=0.5,
-                    #         xref="paper", yref="paper",
-                    #         showarrow=False,
-                    #         font=dict(size=16)
-                    #     )
-                    #     fig.update_layout(
-                    #         title="AOD Frequency Histogram",
-                    #         xaxis_title="AOD Value",
-                    #         yaxis_title="Frequency",
-                    #         height=500
-                    #     )
-                    #     return fig
-
+                        
                     # Create the histogram
                     histogram_fig = create_aod_histogram(data_dict, selected_property, max_cost)
                     return histogram_fig

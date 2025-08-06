@@ -1210,6 +1210,163 @@ def create_combined_intensity_dolp_plot(intensity_data, dolp_data, wavelengths, 
 
     return fig
 
+# Create the total aod plot
+def create_aod_total_plot(data_dict, selected_row, selected_col):
+    """
+    Create a plot showing total AOD as a function of wavelength for the selected point
+    """
+    
+    try: 
+        # Build wavelength mapping using actual data wavelengths and existing total AOD variables
+        wavelength_aod_mapping = []
+        
+        # Look for total AOD variables that actually exist in the data
+        for var_name in sorted(data_dict.keys()):
+            if var_name.startswith('optical_depth_total_') and not var_name.endswith('_2d'):
+                try:
+                    # Extract wavelength from var name
+                    wl_str = var_name.split('_')[-1]
+                    wl = float(wl_str)
+                    wavelength_aod_mapping.append((wl, var_name))
+                except ValueError:
+                    print(f"Could not extract wavelength from {var_name}")
+                    continue
+        
+        # Sort by wavelength
+        wavelength_aod_mapping.sort(key=lambda x: x[0])
+        
+        # Extract available wavelengths and AOD values
+        wavelengths = []
+        aod_values = []
+        
+        for wl, var_name in wavelength_aod_mapping:
+            try:
+                # Check if variable exists
+                if var_name not in data_dict:
+                    continue
+                    
+                # Get the data - try 2D version first, then flattened
+                data_array = None
+                if f"{var_name}_2d" in data_dict:
+                    # Use 2D version
+                    data_array = data_dict[f"{var_name}_2d"]
+                    aod_value = data_array[selected_row, selected_col]
+                elif var_name in data_dict:
+                    # Use flattened version - need to convert indices
+                    data_array = data_dict[var_name]
+                    if 'original_shape' in data_dict:
+                        orig_shape = data_dict['original_shape']
+                        flat_index = selected_row * orig_shape[1] + selected_col
+                        aod_value = data_array[flat_index]
+                
+                # Check if value is valid
+                if np.isfinite(aod_value) and aod_value >= 0:  # Valid AOD values should be non-negative
+                    wavelengths.append(wl)
+                    aod_values.append(aod_value)
+                       
+            except Exception as e:
+                print(f"  ERROR extracting data: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
+        
+        # Check if we have any valid data
+        if not wavelengths:
+            fig = go.Figure()
+            fig.add_annotation(
+                text="No valid AOD data available for this point",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5,
+                showarrow=False,
+                font=dict(size=16, color="#7f8c8d")
+            )
+            fig.update_layout(
+                title="Total AOD vs Wavelength",
+                xaxis_title="Wavelength (nm)",
+                yaxis_title="Aerosol Optical Depth",
+                height=800,
+                margin=dict(l=50, r=40, t=60, b=40)
+            )
+            return fig
+        
+        # Create the total AOD plot
+        fig = go.Figure()
+        
+        # Add the AOD total line
+        fig.add_trace(
+            go.Scatter(
+                x=wavelengths,
+                y=aod_values,
+                mode='markers+lines',
+                name='Total AOD',
+                line=dict(color='#2c3e50', width=3),
+                marker=dict(color='#3498db', size=8, symbol='circle'),
+                hovertemplate='<b>Wavelength:</b> %{x} nm<br>' +
+                             '<b>AOD:</b> %{y:.4f}<br>' +
+                             '<extra></extra>'
+            )
+        )
+        
+        # Update layout
+        fig.update_layout(
+            title={
+                'text': f"Total AOD vs Wavelength<br><sub>Row: {selected_row}, Col: {selected_col}</sub>",
+                'x': 0.5,
+                'xanchor': 'center',
+                'font': {'size': 16, 'color': '#2c3e50'}
+            },
+            xaxis={
+                'title': 'Wavelength (nm)',
+                'title_font': {'size': 14, 'color': '#2c3e50'},
+                'tickfont': {'size': 12},
+                'gridcolor': '#ecf0f1',
+                'showgrid': True,
+                'zeroline': False
+            },
+            yaxis={
+                'title': 'Aerosol Optical Depth',
+                'title_font': {'size': 14, 'color': '#2c3e50'},
+                'tickfont': {'size': 12},
+                'gridcolor': '#ecf0f1',
+                'showgrid': True,
+                'zeroline': False
+            },
+            height=800,
+            showlegend=True,
+            legend=dict(
+                x=0.02,
+                y=0.98,
+                bgcolor="rgba(255,255,255,0.9)",
+                bordercolor="rgba(0,0,0,0.3)",
+                borderwidth=1
+            ),
+            margin=dict(l=60, r=40, t=80, b=60),
+            plot_bgcolor='white',
+            paper_bgcolor='white',
+            hovermode='x unified'
+        )
+        
+        return fig
+        
+    except Exception as e:
+        print(f"Error creating total AOD plot: {e}")
+        # Return an empty figure with error message
+        fig = go.Figure()
+        fig.add_annotation(
+            text=f"Error creating total AOD plot: {str(e)}",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5,
+            showarrow=False,
+            font=dict(size=16, color="red")
+        )
+        fig.update_layout(
+            title="Total AOD Analysis - Error",
+            xaxis_title="Wavelength (nm)",
+            yaxis_title="Aerosol Optical Depth",
+            height=800
+        )
+        return fig
+    
 # Create the residual plot
 def create_residual_plot(data_dict, selected_row, selected_col, residual_type='both'):
 
@@ -1225,7 +1382,7 @@ def create_residual_plot(data_dict, selected_row, selected_col, residual_type='b
 
         # Determine which type was chosen in dropdown
         if residual_type == 'both':
-            # Create subplots for both intensity and DoLP residuals (similar to how plot is made in main)
+            # Create subplots for both intensity and DoLP residuals 
             fig = make_subplots(
                 rows=2, cols=1,
                 subplot_titles=("Intensity Residuals vs VZA", "DoLP Residuals vs VZA"),
@@ -2520,7 +2677,8 @@ def run_app(initial_file_path, directory_path):
                             # 'backgroundColor': ''
                             # 'minHeight': '800px'
                         }),
-                        html.P("This Python application creates an interactive web-based visualization tool for exploring atmospheric aerosol properties from PACE (Plankton, Aerosol, Cloud, ocean Ecosystem). PACE intstruments are HARP2 (polarimeter), SPEXone (polarimeter), and OCI and the Microphysical Aerosol Properties from Polarimetry (MAPP) retrieval framework (Stamnes et al., 2023).", style={'textAlign': 'center'})
+                        html.P("This Python application creates an interactive web-based visualization tool for exploring atmospheric aerosol properties from PACE (Plankton, Aerosol, Cloud, ocean Ecosystem). PACE intstruments are HARP2 (polarimeter), SPEXone (polarimeter), and OCI and the Microphysical Aerosol Properties from Polarimetry (MAPP) retrieval framework (Stamnes et al., 2023).", style={'textAlign': 'center', 'marginRight': '10%', 'marginLeft': '10%'}),
+                        html.P("Select a point in the 'Individual' tab to view the intensity and DoLP fits for that point. Remaining plots may be based on this selected data point", style={'textAlign': 'center', 'marginRight': '10%', 'marginLeft': '10%'}),
                     ]),
 
                     # Individual Tab
@@ -2932,12 +3090,183 @@ def run_app(initial_file_path, directory_path):
 
                       ], style={'padding': '20px'})
                   ]),
+
+                  # Total AOD tab
+                  dcc.Tab(label='AOD Total', value='tab-aod-total', children=[
+                    html.Div([
+                        # LEFT COLUMN - Info and properties table 
+                        html.Div([
+                            # Info section
+                            html.Div([
+                                html.H3("Total AOD vs Wavelength", style={
+                                    'margin': '0 0 10px 0',
+                                    'color': '#34495e',
+                                    'fontSize': '18px',
+                                    'textDecoration': 'underline',
+                                    'display': 'inline-block'
+                                }),
+                                
+                                html.Div([
+                                    html.P("This plot shows the total aerosol optical depth (AOD) as a function of wavelength for the point selected in the Individual tab.", style={
+                                        'fontSize': '12px',
+                                        'color': '#95a5a6',
+                                        'marginBottom': '10px'
+                                    }),
+                                    html.P("The wavelength dependence of AOD provides insights into aerosol particle size distribution and composition.", style={
+                                        'fontSize': '12px',
+                                        'color': '#95a5a6',
+                                        'marginBottom': '0px'
+                                    })
+                                ]),
+                                
+                            ], style={
+                                'padding': '15px',
+                                'border': '1px solid #bdc3c7',
+                                'borderRadius': '5px',
+                                'backgroundColor': '#ffffff',
+                                'marginBottom': '15px'
+                            }),
+
+                            # Selected point properties section (synced from Individual tab)
+                            html.Div([
+                                html.H3("Selected Point Data", style={
+                                    'margin': '0 0 15px 0',
+                                    'color': '#34495e',
+                                    'fontSize': '18px',
+                                    'textDecoration': 'underline',
+                                    'display': 'inline-block'
+                                }),
+                                html.Div(id='aod-total-click-info', style={'marginBottom': '15px', 'fontSize': '14px'}),
+                                html.Div(id='aod-total-panel-properties-table', style={'maxHeight': '400px', 'overflowY': 'auto'}),
+                            ], style={
+                                'padding': '15px',
+                                'border': '1px solid #bdc3c7',
+                                'borderRadius': '5px',
+                                'backgroundColor': '#ffffff'
+                            }),
+
+                        ], style={
+                            'flex': '0 0 25%',
+                            'marginRight': '1%'
+                        }),
+
+                        # RIGHT COLUMN - AOD Total plot (taking up the space of middle + right)
+                        html.Div([
+                            dcc.Graph(
+                                id='aod-total-plot',
+                                style={'height': '800px', 'border': '1px solid #bdc3c7', 'borderRadius': '5px'}
+                            ),
+                        ], style={
+                            'flex': '0 0 74%'  # Combined size of middle and right columns
+                        }),
+                        
+                    ], style={
+                        'display': 'flex',
+                        'flexDirection': 'row',
+                        'padding': '0 20px',
+                        'gap': '0px'
+                    }),
+                    ]),
                 ]),
             ], style={'backgroundColor': '#ecf0f1', 'minHeight': '100vh', 'padding': '20px 0'})
             # END of APP LAYOUT
 
 
             # Begin Callbacks
+            # AOD TOTAL PLOT CALLBACKS
+            # Callback to update aod-total-click-info with the same data as click-info
+            @app.callback(
+                Output('aod-total-click-info', 'children'),
+                Input('click-info', 'children')
+            )
+            def sync_aod_total_click_info(click_info_content):
+                return click_info_content
+
+            # Callback to update the aod-total-panel-properties-table based on clicked point
+            @app.callback(
+                Output('aod-total-panel-properties-table', 'children'),
+                Input('panel-properties-table', 'children'),
+                Input('clicked-point-store', 'data'),
+                Input('visualization-tabs', 'value')
+            )
+            def update_aod_total_panel_properties(properties_table_content, clicked_data, active_tab):
+                # Empty if not on aod total tab
+                if active_tab != 'tab-aod-total':
+                    return []
+
+                # If no point clicked yet
+                if clicked_data is None:
+                    return html.Div("Click on a point in the Individual tab to see properties")
+
+                # Use the same table as the one in the main visualization
+                return properties_table_content
+
+            # Callback to update the AOD total plot
+            @app.callback(
+                Output('aod-total-plot', 'figure'),
+                [Input('file-selector', 'value'),
+                Input('clicked-point-store', 'data'),
+                Input('visualization-tabs', 'value')]
+            )
+            def update_aod_total_plot(file_path, clicked_data, active_tab):
+                """
+                Updated callback for AOD total plot that uses actual data
+                """
+                if active_tab != 'tab-aod-total':
+                    # Return empty figure when not on aod total tab
+                    return go.Figure()
+
+                # Check if we have a selected point
+                if clicked_data is None:
+                    fig = go.Figure()
+                    fig.add_annotation(
+                        text="Click on a point in the Individual tab to see total AOD vs wavelength",
+                        xref="paper", yref="paper",
+                        x=0.5, y=0.5,
+                        showarrow=False,
+                        font=dict(size=16, color="#7f8c8d")
+                    )
+                    fig.update_layout(
+                        title="Total AOD Analysis",
+                        xaxis_title="Wavelength (nm)",
+                        yaxis_title="Aerosol Optical Depth",
+                        height=800,
+                        margin=dict(l=60, r=40, t=80, b=60)
+                    )
+                    return fig
+
+                # Get the selected point data
+                selected_row = clicked_data.get('row')
+                selected_col = clicked_data.get('col')
+
+                if selected_row is None or selected_col is None:
+                    fig = go.Figure()
+                    fig.add_annotation(
+                        text="Invalid point selected! Please select a point again.",
+                        xref="paper", yref="paper",
+                        x=0.5, y=0.5,
+                        showarrow=False,
+                        font=dict(size=16, color="red")
+                    )
+                    return fig
+
+                # Load the data for the current file
+                try:
+                    data_dict, _, _, _ = read_hdf5_variables(file_path)
+                except Exception as e:
+                    fig = go.Figure()
+                    fig.add_annotation(
+                        text=f"Error loading data: {str(e)}",
+                        xref="paper", yref="paper",
+                        x=0.5, y=0.5,
+                        showarrow=False,
+                        font=dict(size=16, color="red")
+                    )
+                    return fig
+
+                # Create the AOD total plot
+                return create_aod_total_plot(data_dict, selected_row, selected_col)
+
             # AOD HISTOGRAM CALLBACKS
             @app.callback(
               Output('aod-histogram', 'figure'),

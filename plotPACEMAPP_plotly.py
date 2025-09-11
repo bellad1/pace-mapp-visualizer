@@ -923,6 +923,37 @@ def generate_wavelength_colors(wavelengths):
 # =============================================================================
 # PLOTTING AND VISUALIZATION FUNCTIONS
 # =============================================================================
+def create_initial_combined_figure():
+    """
+    Create initial combined figure with 'click to view' annotation
+    """
+    combined_fig = go.Figure()
+
+    combined_fig.update_layout(
+        height=800,
+        showlegend=True,
+        margin=dict(
+            l=50,  # left margin
+            r=40,  # right
+            t=40,  # top (default ~80)
+            b=40   # bottom
+        ),
+        autosize=True
+    )
+
+    # Add pre-click annotation
+    combined_fig.add_annotation(
+        text="Click a point on the map to view Intensity and DoLP plots",
+        xref="x", yref="y",
+        x=2.5, y=1.5,
+        showarrow=False,
+        font=dict(size=18, color="black"),
+        xanchor='center', yanchor='middle'
+    )
+
+    return combined_fig
+
+
 def create_scatter_plot_only(data_dict, selected_property, original_indices, clicked_point_data=None, max_cost=None):
     """
     Creates scatter plot only, not as a subplot like in previous
@@ -2853,6 +2884,7 @@ def run_app(initial_file_path, directory_path):
                     'default_var': default_var
                 }),
                 dcc.Store(id='clicked-point-store'),
+                dcc.Store(id='applied-cost-value', data=default_cost_value),
 
                 # Page header
                 html.H1("PACE-MAPP Aerosol Properties Interactive Visualization",
@@ -3079,6 +3111,7 @@ def run_app(initial_file_path, directory_path):
                                 html.Div([
                                     dcc.Graph(
                                         id='combined-plot',
+                                        figure=create_initial_combined_figure(),
                                         style={'height': '800px', 'border': '1px solid #bdc3c7', 'borderRadius': '5px'}  # Full height
                                     ),
                                 ]),
@@ -3529,7 +3562,8 @@ def run_app(initial_file_path, directory_path):
             # ---------------------------------------------------
             @app.callback(
                 Output('aod-total-click-info', 'children'),
-                Input('click-info', 'children')
+                Input('click-info', 'children'),
+                prevent_initial_call=True
             )
             def sync_aod_total_click_info(click_info_content):
                 print("Doing callback: sync_aod_total_click_info")
@@ -3544,7 +3578,8 @@ def run_app(initial_file_path, directory_path):
                 Output('aod-total-panel-properties-table', 'children'),
                 Input('panel-properties-table', 'children'),
                 Input('clicked-point-store', 'data'),
-                Input('visualization-tabs', 'value')
+                Input('visualization-tabs', 'value'),
+                prevent_initial_call=True
             )
             def update_aod_total_panel_properties(properties_table_content, clicked_data, active_tab):
                 print("Doing callback: update_aod_total_panel_properties")
@@ -3567,7 +3602,8 @@ def run_app(initial_file_path, directory_path):
                 Output('aod-total-plot', 'figure'),
                 [Input('file-selector', 'value'),
                  Input('clicked-point-store', 'data'),
-                 Input('visualization-tabs', 'value')]
+                 Input('visualization-tabs', 'value')],
+                prevent_initial_call=True
             )
             def update_aod_total_plot(file_path, clicked_data, active_tab):
                 print("Doing callback: update_aod_total_plot")
@@ -3635,8 +3671,10 @@ def run_app(initial_file_path, directory_path):
             @app.callback(
               Output('aod-histogram', 'figure'),
               [Input('property-selector', 'value'),
-               Input('cost-input', 'value'),
-               Input('current-file-data', 'data')]
+               # Input('cost-input', 'value'),
+               Input('applied-cost-value', 'data'),
+               Input('current-file-data', 'data')],
+              prevent_initial_call=True
               )
             def update_histogram(selected_property, max_cost, current_file_data):
                 """
@@ -3714,7 +3752,8 @@ def run_app(initial_file_path, directory_path):
                 Output('polarized-panel-properties-table', 'children'),
                 Input('panel-properties-table', 'children'),
                 Input('clicked-point-store', 'data'),
-                Input('visualization-tabs', 'value')
+                Input('visualization-tabs', 'value'),
+                prevent_initial_call=True
             )
             def update_polarized_panel_properties(properties_table_content, clicked_data, active_tab):
                 print("Doing callback: update_polarized_panel_properties")
@@ -3741,7 +3780,8 @@ def run_app(initial_file_path, directory_path):
                  Input('polarized-analysis-mode', 'value'),
                  Input('polarized-difference-type', 'value'),
                  Input('clicked-point-store', 'data'),
-                 Input('visualization-tabs', 'value')]
+                 Input('visualization-tabs', 'value')],
+                prevent_initial_call=True
             )
             def update_polarized_reflectance_plot(file_path_1, file_path_2, analysis_mode, difference_type, clicked_data, active_tab):
                 """
@@ -3964,7 +4004,8 @@ def run_app(initial_file_path, directory_path):
                  Output('polarized-difference-container', 'style')],
                 [Input('polarized-analysis-mode', 'value'),
                  Input('file-selector', 'options'),
-                 Input('polarized-file-selector-2', 'value')]
+                 Input('polarized-file-selector-2', 'value')],
+                prevent_initial_call=True
             )
             def toggle_polarized_controls_visibility(analysis_mode, available_files, file2_selected):
                 """Show/hide second file selector and difference type based on analysis mode and file selection"""
@@ -4010,7 +4051,8 @@ def run_app(initial_file_path, directory_path):
                 Output('residual-panel-properties-table', 'children'),
                 Input('panel-properties-table', 'children'),
                 Input('clicked-point-store', 'data'),
-                Input('visualization-tabs', 'value')
+                Input('visualization-tabs', 'value'),
+                prevent_initial_call=True
               )
             def update_residual_panel_properties(properties_table_content, clicked_data, active_tab):
                 print("Doing callback: update_residual_panel_properties")
@@ -4034,7 +4076,8 @@ def run_app(initial_file_path, directory_path):
                 [Input('residual-file-selector', 'value'),
                  Input('residual-type-selector', 'value'),
                  Input('clicked-point-store', 'data'),
-                 Input('visualization-tabs', 'value')]
+                 Input('visualization-tabs', 'value')],
+                prevent_initial_call=True
             )
             def update_residual_plot(file_path, residual_type, clicked_data, active_tab):
                 """
@@ -4136,7 +4179,8 @@ def run_app(initial_file_path, directory_path):
                  Output('current-file-data', 'data'),
                  Output('cost-input', 'max'),
                  Output('cost-input', 'value'),
-                 Output('clicked-point-store', 'data')],
+                 Output('clicked-point-store', 'data'),
+                 Output('applied-cost-value', 'data')],
                 [Input('file-selector', 'value')],
                 prevent_initial_call=True
             )
@@ -4172,15 +4216,24 @@ def run_app(initial_file_path, directory_path):
                     }
 
                     # Reset clicked point data when changing files
+                    # return (
+                    #     new_dropdown_options,
+                    #     new_default_var,
+                    #     new_file_data,
+                    #     # new_max_cost_value,
+                    #     min(default_cost, new_max_cost_value),
+                    #     # new_max_cost_value,
+                    #     new_default_cost_value,
+                    #     None
+                    # )
                     return (
                         new_dropdown_options,
                         new_default_var,
                         new_file_data,
-                        # new_max_cost_value,
-                        min(default_cost, new_max_cost_value),
-                        # new_max_cost_value,
+                        new_max_cost_value,
                         new_default_cost_value,
-                        None
+                        None,
+                        new_default_cost_value
                     )
 
                 except Exception as e:
@@ -4193,11 +4246,13 @@ def run_app(initial_file_path, directory_path):
             # ---------------------------------------------------
             @app.callback(
                 [Output('cost-input', 'value', allow_duplicate=True),
-                 Output('cost-input-message', 'children')],
+                 Output('cost-input-message', 'children'),
+                 Output('applied-cost-value', 'data', allow_duplicate=True)],
                 [Input('apply-cost-button', 'n_clicks')],
                 [State('cost-input', 'value'),
                  State('current-file-data', 'data')],
-                prevent_initial_call='initial_duplicate'
+                # prevent_initial_call='initial_duplicate'
+                prevent_initial_call=True
             )
             def validate_cost_input(n_clicks, input_value, current_file_data):
                 print("Doing callback: validate_cost_input")
@@ -4206,7 +4261,8 @@ def run_app(initial_file_path, directory_path):
                     print("Current file data:", current_file_data)
 
                 if n_clicks == 0:
-                    return no_update, ""
+                    # return no_update, ""
+                    return no_update, "", no_update
 
                 # Safer to use default value if max_cost_value can't be found
                 max_cost_value = 200.0
@@ -4223,12 +4279,15 @@ def run_app(initial_file_path, directory_path):
 
                 # Ensure cost val is within bounds
                 if input_value < 0:
-                    return 0, "Input was less than 0. Using minimum value (0)."
+                    # return 0, "Input was less than 0. Using minimum value (0)."
+                    return 0, "Input was less than 0. Using minimum value (0).", 0
 
                 if input_value > max_cost_value:
-                    return max_cost_value, f"Input exceeded maximum. Using maximum value ({max_cost_value:.2f})."
+                    # return max_cost_value, f"Input exceeded maximum. Using maximum value ({max_cost_value:.2f})."
+                    return max_cost_value, f"Input exceeded maximum. Using maximum value ({max_cost_value:.2f}).", max_cost_value
 
-                return input_value, f"Using cost threshold: {input_value:.2f}"
+                # return input_value, f"Using cost threshold: {input_value:.2f}"
+                return input_value, f"Using cost threshold: {input_value:.2f}", input_value
 
             # 3. UI SYNCHRONIZATION CALLBACKS
             # ---------------------------------------------------
@@ -4239,7 +4298,8 @@ def run_app(initial_file_path, directory_path):
                      Output('longitude-input', 'value')],
                     [Input('aerosol-plot', 'clickData')],
                     [State('clicked-point-store', 'data'),
-                     State('current-file-data', 'data')]
+                     State('current-file-data', 'data')],
+                    prevent_initial_call=True
                     )
             def update_latlon_inputs(clickData, stored_point_data, current_file_data):
                 print("Doing callback: update_latlon_inputs")
@@ -4289,15 +4349,16 @@ def run_app(initial_file_path, directory_path):
                  Output('click-info', 'children'),
                  Output('panel-properties-table', 'children')],
                 [Input('property-selector', 'value'),
-                 Input('cost-input', 'value'),
+                 # Input('cost-input', 'value'),
+                 Input('applied-cost-value', 'data'),
                  Input('aerosol-plot', 'clickData'),
                  Input('find-point-button', 'n_clicks'),
                  Input('current-file-data', 'data')],
                 [State('latitude-input', 'value'),
                  State('longitude-input', 'value'),
                  State('clicked-point-store', 'data')],
-                prevent_initial_call='initial_duplicate'
-                # prevent_initial_call=True
+                # prevent_initial_call='initial_duplicate'
+                prevent_initial_call=True
             )
             def update_all_plots(selected_property, max_cost, clickData, find_button_clicks,
                                  current_file_data, input_lat, input_lon, stored_point_data):

@@ -17,6 +17,7 @@ import sys
 
 PLOT_WIDTH = 1550  # in pixels
 debug = 1
+default_cost = 0.5
 
 
 # =============================================================================
@@ -829,7 +830,9 @@ def get_channel_intensity_dolp_vza(data_dict, row_idx, col_idx):
 # FORMATTING AND DISPLAY FUNCTIONS
 # =============================================================================
 def create_dropdown_options(sorted_variables, display_names, variable_metadata):
-    """Create properly formatted dropdown options"""
+    """
+    Create properly formatted dropdown options
+    """
     # Regular options (without dropdown groups)
     regular_options = []
 
@@ -1035,6 +1038,9 @@ def create_scatter_plot_only(data_dict, selected_property, original_indices, cli
     center_lon = np.mean(lon_valid) if len(lon_valid) > 0 else -121
 
     fig.update_layout(
+        uirevision="preserve-zoom"
+    )
+    fig.update_layout(
         title="",
         map=dict(
             style="open-street-map",
@@ -1060,7 +1066,7 @@ def create_combined_intensity_dolp_plot(intensity_data, dolp_data, wavelengths, 
     with legend between them
     """
 
-    DEBUG_PLOTTING = True
+    DEBUG_PLOTTING = False
 
     # Create subplots
     fig = make_subplots(
@@ -1210,16 +1216,17 @@ def create_combined_intensity_dolp_plot(intensity_data, dolp_data, wavelengths, 
 
     return fig
 
+
 # Create the total aod plot
 def create_aod_total_plot(data_dict, selected_row, selected_col):
     """
     Create a plot showing total AOD as a function of wavelength for the selected point
     """
-    
-    try: 
+
+    try:
         # Build wavelength mapping using actual data wavelengths and existing total AOD variables
         wavelength_aod_mapping = []
-        
+
         # Look for total AOD variables that actually exist in the data
         for var_name in sorted(data_dict.keys()):
             if var_name.startswith('optical_depth_total_') and not var_name.endswith('_2d'):
@@ -1231,20 +1238,20 @@ def create_aod_total_plot(data_dict, selected_row, selected_col):
                 except ValueError:
                     print(f"Could not extract wavelength from {var_name}")
                     continue
-        
+
         # Sort by wavelength
         wavelength_aod_mapping.sort(key=lambda x: x[0])
-        
+
         # Extract available wavelengths and AOD values
         wavelengths = []
         aod_values = []
-        
+
         for wl, var_name in wavelength_aod_mapping:
             try:
                 # Check if variable exists
                 if var_name not in data_dict:
                     continue
-                    
+
                 # Get the data - try 2D version first, then flattened
                 data_array = None
                 if f"{var_name}_2d" in data_dict:
@@ -1258,18 +1265,18 @@ def create_aod_total_plot(data_dict, selected_row, selected_col):
                         orig_shape = data_dict['original_shape']
                         flat_index = selected_row * orig_shape[1] + selected_col
                         aod_value = data_array[flat_index]
-                
+
                 # Check if value is valid
                 if np.isfinite(aod_value) and aod_value >= 0:  # Valid AOD values should be non-negative
                     wavelengths.append(wl)
                     aod_values.append(aod_value)
-                       
+
             except Exception as e:
                 print(f"  ERROR extracting data: {e}")
                 import traceback
                 traceback.print_exc()
                 continue
-        
+
         # Check if we have any valid data
         if not wavelengths:
             fig = go.Figure()
@@ -1288,10 +1295,10 @@ def create_aod_total_plot(data_dict, selected_row, selected_col):
                 margin=dict(l=50, r=40, t=60, b=40)
             )
             return fig
-        
+
         # Create the total AOD plot
         fig = go.Figure()
-        
+
         # Add the AOD total line
         fig.add_trace(
             go.Scatter(
@@ -1302,11 +1309,11 @@ def create_aod_total_plot(data_dict, selected_row, selected_col):
                 line=dict(color='#2c3e50', width=3),
                 marker=dict(color='#3498db', size=8, symbol='circle'),
                 hovertemplate='<b>Wavelength:</b> %{x} nm<br>' +
-                             '<b>AOD:</b> %{y:.4f}<br>' +
-                             '<extra></extra>'
+                              '<b>AOD:</b> %{y:.4f}<br>' +
+                              '<extra></extra>'
             )
         )
-        
+
         # Update layout
         fig.update_layout(
             title={
@@ -1345,9 +1352,9 @@ def create_aod_total_plot(data_dict, selected_row, selected_col):
             paper_bgcolor='white',
             hovermode='x unified'
         )
-        
+
         return fig
-        
+
     except Exception as e:
         print(f"Error creating total AOD plot: {e}")
         # Return an empty figure with error message
@@ -1366,7 +1373,8 @@ def create_aod_total_plot(data_dict, selected_row, selected_col):
             height=800
         )
         return fig
-    
+
+
 # Create the residual plot
 def create_residual_plot(data_dict, selected_row, selected_col, residual_type='both'):
 
@@ -1382,7 +1390,7 @@ def create_residual_plot(data_dict, selected_row, selected_col, residual_type='b
 
         # Determine which type was chosen in dropdown
         if residual_type == 'both':
-            # Create subplots for both intensity and DoLP residuals 
+            # Create subplots for both intensity and DoLP residuals
             fig = make_subplots(
                 rows=2, cols=1,
                 subplot_titles=("Intensity Residuals vs VZA", "DoLP Residuals vs VZA"),
@@ -1556,6 +1564,191 @@ def create_residual_plot(data_dict, selected_row, selected_col, residual_type='b
         )
         return fig
 
+
+def create_polarized_reflectance_comparison_plot(intensity_data_1, dolp_data_1,
+                                                 intensity_data_2, dolp_data_2,
+                                                 wavelengths, wl_colors,
+                                                 file_path_1, file_path_2,
+                                                 difference_type='simple'):
+    """
+    Create a comparison plot showing polarized reflectance from two different
+    files. Compares measured data from both files
+    """
+
+    # Extract shortened filenames for title and legend
+    file1_name = file_path_1.split('/')[-1].replace('.h5', '').replace('.nc', '') if file_path_1 else 'File 1'
+    file2_name = file_path_2.split('/')[-1].replace('.h5', '').replace('.nc', '') if file_path_2 else 'File 2'
+
+    fig = go.Figure()
+
+    # Calculate/plot polarized reflectance diff for each wavelength
+    # from both files (modeled and measured)
+    for wl in wavelengths:
+        name = f'{wl} nm'
+
+        # Check if both files have data for this wavelength
+        if (wl in intensity_data_1 and wl in dolp_data_1 and wl in intensity_data_2 and wl in dolp_data_2):
+
+            # Begin with MEASURED data
+            # FILE 1 - Calc polarized reflectance (measured)
+            min_len_1 = min(len(intensity_data_1[wl]['y_meas']), len(dolp_data_1[wl]['y_meas']))
+            x_1 = intensity_data_1[wl]['x'][:min_len_1]
+            polarized_refl_1 = (
+                np.array(intensity_data_1[wl]['y_meas'][:min_len_1]) *
+                np.array(dolp_data_1[wl]['y_meas'][:min_len_1])
+            )
+
+            # FILE 2 - Calc polarized reflectance (measured)
+            min_len_2 = min(len(intensity_data_2[wl]['y_meas']), len(dolp_data_2[wl]['y_meas']))
+            # x_2 = intensity_data_2[wl]['x'][:min_len_2]
+            polarized_refl_2 = (
+                np.array(intensity_data_2[wl]['y_meas'][:min_len_2]) *
+                np.array(dolp_data_2[wl]['y_meas'][:min_len_2])
+            )
+
+            # Calculate refl difference based on method (measured)
+            # Need to match the arrays: (probably bettter way to do this)
+            #   use the shorter length and corresponding x values
+            min_common_len = min(len(polarized_refl_1), len(polarized_refl_2))
+            x_common = x_1[:min_common_len]  # Use x values from file 1
+            file1_values = polarized_refl_1[:min_common_len]
+            file2_values = polarized_refl_2[:min_common_len]
+
+            if difference_type == 'percent':
+                # Percent difference: ((File1 - File2) / File2) * 100
+                # Handle division by zero
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    difference = np.where(file2_values != 0,
+                                          ((file1_values - file2_values) / file2_values) * 100,
+                                          np.nan)  # set to NaN where File2 is zero
+            else:
+                # Simple difference: file1 - File2
+                # difference = polarized_refl_1[:min_common_len] - polarized_refl_2[:min_common_len]
+                difference = file1_values - file2_values
+
+            # Add difference trace (measured)
+            fig.add_trace(
+                go.Scatter(
+                    x=x_common,
+                    y=difference,
+                    mode='markers+lines',
+                    name=f'{name} (measured)',
+                    line=dict(color=wl_colors[wl], width=2),
+                    marker=dict(color=wl_colors[wl], size=6),
+                    legendgroup=f'wl{wl}',
+                    showlegend=True
+                )
+            )
+
+            # Now with MODELED data
+            # FILE 1 - Calc polarized reflectance (modeled)
+            min_len_1 = min(len(intensity_data_1[wl]['y_model']), len(dolp_data_1[wl]['y_model']))
+            x_1 = intensity_data_1[wl]['x'][:min_len_1]
+            polarized_refl_1 = (
+                np.array(intensity_data_1[wl]['y_model'][:min_len_1]) *
+                np.array(dolp_data_1[wl]['y_model'][:min_len_1])
+            )
+
+            # FILE 2 - Calculate polarized reflectance (modeled data)
+            min_len_2 = min(len(intensity_data_2[wl]['y_model']), len(dolp_data_2[wl]['y_model']))
+            # x_2 = intensity_data_2[wl]['x'][:min_len_2]
+            polarized_refl_2 = (
+                np.array(intensity_data_2[wl]['y_model'][:min_len_2]) *
+                np.array(dolp_data_2[wl]['y_model'][:min_len_2])
+            )
+
+            # Calculate refl difference (modeled)
+            # Need to match the arrays - use the shorter length and corresponding x values
+            min_common_len = min(len(polarized_refl_1), len(polarized_refl_2))
+            x_common = x_1[:min_common_len]  # Use x values from file 1
+            file1_values = polarized_refl_1[:min_common_len]
+            file2_values = polarized_refl_2[:min_common_len]
+
+            if difference_type == 'percent':
+                # Percent difference: ((File1 - File2) / File2) * 100
+                # Handle division by zero
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    difference = np.where(file2_values != 0,
+                                          ((file1_values - file2_values) / file2_values) * 100,
+                                          np.nan)  # set to NaN where File2 is zero
+            else:
+                # Simple difference: file1 - File2
+                # difference = polarized_refl_1[:min_common_len] - polarized_refl_2[:min_common_len]
+                difference = file1_values - file2_values
+
+            # Add difference trace (modeled)
+            fig.add_trace(
+                go.Scatter(
+                    x=x_common,
+                    y=difference,
+                    mode='markers+lines',
+                    name=f'{name} (modeled)',
+                    line=dict(color=wl_colors[wl], width=2, dash='dash'),
+                    marker=dict(color=wl_colors[wl], size=6),
+                    legendgroup=f'wl{wl}',
+                    showlegend=True
+                )
+            )
+
+    # Add horizontal line at 0 for reference
+    if len(fig.data) > 0:  # only if we have data
+        x_range = [min([min(trace.x) for trace in fig.data]),
+                   max([max(trace.x) for trace in fig.data])]
+        fig.add_trace(
+                go.Scatter(
+                    x=x_range,
+                    y=[0, 0],
+                    mode='lines',
+                    name='Zero Reference',
+                    line=dict(color='black', width=1, dash='dot'),
+                    showlegend=False
+                )
+        )
+
+    # Set up labels based on difference type
+    if difference_type == 'percent':
+        title_prefix = "Polarized Reflectance % Difference"
+        y_label = "Percent Difference [(File1 - File2) / File2 × 100]"
+        legend_text = f"<b>Percent Difference</b><br>({file1_name} - {file2_name})<br>/ {file2_name} × 100<br><br><b>Wavelengths</b>"
+    else:
+        title_prefix = "Polarized Reflectance Difference"
+        y_label = "Polarized Reflectance Difference"
+        legend_text = f"<b>Difference</b><br>{file1_name}<br>minus<br>{file2_name}<br><br><b>Wavelengths</b>"
+
+    # Update layout
+    fig.update_layout(
+        # title=f"Polarized Reflectance Comparison: {file1_name} vs {file2_name}",
+        # title=f"Polarized Reflectance ({file1_name} vs {file2_name}",
+        # title=f"{title_prefix}<br><b> File 1:</b> {file1_name}<br><b> File 2:</b> {file2_name}<br>",
+        title=f"{title_prefix}:<br><b>{file1_name}</b> vs <b>{file2_name}</b>",
+        xaxis_title="Viewing Zenith Angle (degrees)",
+        # yaxis_title="Polarized Reflectance Difference (File 1 - File 2)",
+        yaxis_title=y_label,
+        height=800,
+        showlegend=True,
+        margin=dict(l=50, r=40, t=60, b=40),
+        legend=dict(
+            orientation="v",
+            yanchor="top",
+            y=1,
+            xanchor="left",
+            x=1.02,
+            bgcolor="rgba(255,255,255,0.9)",
+            bordercolor="rgba(0,0,0,0.3)",
+            borderwidth=1,
+            title=dict(
+                # text=f"<b>— Solid: {file1_name}</b><br><b>- - Dashed: {file2_name}</b><br><br><b>Wavelengths</b>",
+                # text=f"<b>Wavelengths</b><br>(— {file1_name}, - - {file2_name})",
+                font=dict(size=12, family="Arial", color="black"),
+                side="top"
+            )
+        ),
+        autosize=True
+    )
+
+    return fig
+
+
 def create_properties_table(filtered_data, selected_row, selected_col):
     """Create a table showing aerosol properties by mode"""
 
@@ -1633,12 +1826,13 @@ def create_properties_table(filtered_data, selected_row, selected_col):
                 *[html.Td(mode_values.get(mode, "—"),
                           style={'textAlign': 'center', 'padding': '8px',
                                  'borderBottom': '1px solid #ecf0f1',
-                                 'color': mode_colors[mode] if mode_values.get(mode, "—") not in ["—", "N/A"] else '#95a5a6'}) 
+                                 'color': mode_colors[mode] if mode_values.get(mode, "—") not in ["—", "N/A"] else '#95a5a6'})
                   for mode in modes]
             ])
             table_rows.append(row)
 
     return html.Table(table_rows, style={'width': '100%', 'borderCollapse': 'collapse'})
+
 
 # Create AOD Histogram
 def create_aod_histogram(data_dict, selected_property, max_cost, bin_size=0.1):
@@ -1756,37 +1950,38 @@ def create_aod_histogram(data_dict, selected_property, max_cost, bin_size=0.1):
 
     return fig
 
+
 def create_polarized_reflectance_plot(intensity_data, dolp_data, wavelengths, wl_colors):
     """
     Create a plot showing polarized reflectance (DoLP × Intensity) vs VZA
     with both measured and modeled data
     """
-    
-    DEBUG_PLOTTING = True
-    
+
+    DEBUG_PLOTTING = False
+
     # Create single plot
     fig = go.Figure()
-    
+
     # Calculate polarized reflectance for each wavelength
     for wl in wavelengths:
         name = f'{wl} nm'
-        
+
         # Calculate polarized reflectance - measured data
         min_len_meas = min(len(intensity_data[wl]['y_meas']), len(dolp_data[wl]['y_meas']))
         x_meas = intensity_data[wl]['x'][:min_len_meas]
         polarized_refl_meas = (
-            np.array(intensity_data[wl]['y_meas'][:min_len_meas]) * 
+            np.array(intensity_data[wl]['y_meas'][:min_len_meas]) *
             np.array(dolp_data[wl]['y_meas'][:min_len_meas])
         )
-        
+
         # Calculate polarized reflectance - modeled data
         min_len_model = min(len(intensity_data[wl]['y_model']), len(dolp_data[wl]['y_model']))
         x_model = intensity_data[wl]['x'][:min_len_model]
         polarized_refl_model = (
-            np.array(intensity_data[wl]['y_model'][:min_len_model]) * 
+            np.array(intensity_data[wl]['y_model'][:min_len_model]) *
             np.array(dolp_data[wl]['y_model'][:min_len_model])
         )
-        
+
         # Add measured polarized reflectance trace
         fig.add_trace(
             go.Scatter(
@@ -1800,7 +1995,7 @@ def create_polarized_reflectance_plot(intensity_data, dolp_data, wavelengths, wl
                 showlegend=True
             )
         )
-        
+
         # Add modeled polarized reflectance trace
         fig.add_trace(
             go.Scatter(
@@ -1813,8 +2008,7 @@ def create_polarized_reflectance_plot(intensity_data, dolp_data, wavelengths, wl
                 showlegend=True
             )
         )
-        
-    
+
     # Update layout
     fig.update_layout(
         title="Polarized Reflectance (DoLP × Intensity) vs Viewing Zenith Angle",
@@ -1840,8 +2034,9 @@ def create_polarized_reflectance_plot(intensity_data, dolp_data, wavelengths, wl
         ),
         autosize=True
     )
-    
+
     return fig
+
 
 # =============================================================================
 # EXPORT FUNCTIONS
@@ -2624,6 +2819,8 @@ def run_app(initial_file_path, directory_path):
             # (updated to nanmax, nanmin)
             max_cost_value = np.nanmax(data_dict['cost_function'])
             min_cost_value = np.nanmin(data_dict['cost_function'])
+            # default_cost_value = min(0.7, max_cost_value)
+            default_cost_value = min(default_cost, max_cost_value)
 
             # Create the Dash app
             app = Dash(__name__, suppress_callback_exceptions=True)
@@ -2640,11 +2837,11 @@ def run_app(initial_file_path, directory_path):
                 default_var = sorted_variables[0]
 
             # Filter initial data and get original indices
-            filtered_data, original_indices = filter_by_cost(data_dict, max_cost_value)
+            # filtered_data, original_indices = filter_by_cost(data_dict, max_cost_value)
+            filtered_data, original_indices = filter_by_cost(data_dict, default_cost_value)
 
             # Group variables for the dropdown
             dropdown_options = create_dropdown_options(sorted_variables, display_names, variable_metadata)
-
 
             # Updated app layout with tabs
             app.layout = html.Div([
@@ -2666,13 +2863,18 @@ def run_app(initial_file_path, directory_path):
                             'color': '#2c3e50'
                         }),
 
+                # ---------------------------------------------------
                 # Tabs component
-                dcc.Tabs(id="visualization-tabs", value='tab-all', children=[
+                # ---------------------------------------------------
+                # dcc.Tabs(id="visualization-tabs", value='tab-about', children=[
+                dcc.Tabs(id="visualization-tabs", value='tab-individual', children=[
+                    # ---------------------------------------------------
                     # About Tab
+                    # ---------------------------------------------------
                     dcc.Tab(label='About', value='tab-about', children=[
                         html.Div([
                             html.H2("About PACE-MAPP Aerosol Properties Visualization Tool",
-                                  style={'textAlign': 'center', 'marginBottom': '20px', 'color': '#2c3e50'})], style={
+                                    style={'textAlign': 'center', 'marginBottom': '20px', 'color': '#2c3e50'})], style={
                             'padding': '20px'
                             # 'backgroundColor': ''
                             # 'minHeight': '800px'
@@ -2681,7 +2883,9 @@ def run_app(initial_file_path, directory_path):
                         html.P("Select a point in the 'Individual' tab to view the intensity and DoLP fits for that point. Remaining plots may be based on this selected data point", style={'textAlign': 'center', 'marginRight': '10%', 'marginLeft': '10%'}),
                     ]),
 
+                    # ---------------------------------------------------
                     # Individual Tab
+                    # ---------------------------------------------------
                     dcc.Tab(label='Individual', value='tab-individual', children=[
                         # Main three-column layout for Individual tab
                         html.Div([
@@ -2774,14 +2978,15 @@ def run_app(initial_file_path, directory_path):
                                         ], style={'display': 'flex', 'marginBottom': '10px'}),
                                         html.Button('Find Closest Point', id='find-point-button', n_clicks=0,
                                                     style={'width': '100%', 'padding': '8px', 'backgroundColor': '#3498db',
-                                                          'color': 'white', 'border': 'none', 'borderRadius': '4px',
-                                                          'cursor': 'pointer', 'marginBottom': '15px'}),
+                                                           'color': 'white', 'border': 'none', 'borderRadius': '4px',
+                                                           'cursor': 'pointer', 'marginBottom': '15px'}),
                                     ]),
 
                                     # Cost selector
                                     html.Div([
-                                        html.Label(f"Cost Filter (Min={min_cost_value:.3f}/Max={max_cost_value:.3f}):",
-                                                  style={
+                                        # html.Label(f"Cost Filter (Min={min_cost_value:.3f}/Max={max_cost_value:.3f}):",
+                                        html.Label(f"Cost Filter (Default={default_cost_value}/Range=[{min_cost_value:.3f}, {max_cost_value:.3f}]):",
+                                                   style={
                                                       'fontWeight': 'bold',
                                                       'marginBottom': '5px',
                                                       'display': 'block',
@@ -2793,7 +2998,8 @@ def run_app(initial_file_path, directory_path):
                                                 type='number',
                                                 min=0,
                                                 max=max_cost_value,
-                                                value=max_cost_value,
+                                                # value=max_cost_value,
+                                                value=default_cost_value,
                                                 step=0.1,
                                                 style={
                                                     'width': '65%',
@@ -2804,8 +3010,8 @@ def run_app(initial_file_path, directory_path):
                                             ),
                                             html.Button('Apply', id='apply-cost-button', n_clicks=0,
                                                         style={'width': '30%', 'padding': '8px', 'backgroundColor': '#27ae60',
-                                                              'color': 'white', 'border': 'none', 'borderRadius': '4px',
-                                                              'cursor': 'pointer'}),
+                                                               'color': 'white', 'border': 'none', 'borderRadius': '4px',
+                                                               'cursor': 'pointer'}),
                                         ], style={'display': 'flex', 'marginBottom': '30px'}),
                                         html.Div(id='cost-input-message', style={'fontSize': '12px', 'color': '#7f8c8d'}),
                                     ]),
@@ -2814,12 +3020,12 @@ def run_app(initial_file_path, directory_path):
                                     html.Div([
                                         html.Button('Export PNG', id='export-button', n_clicks=0,
                                                     style={'width': '48%', 'marginRight': '4%', 'padding': '10px',
-                                                          'backgroundColor': '#e74c3c', 'color': 'white', 'border': 'none',
-                                                          'borderRadius': '4px', 'cursor': 'pointer'}),
+                                                           'backgroundColor': '#e74c3c', 'color': 'white', 'border': 'none',
+                                                           'borderRadius': '4px', 'cursor': 'pointer'}),
                                         html.Button('Export KML', id='export-kml-button', n_clicks=0,
                                                     style={'width': '48%', 'padding': '10px', 'backgroundColor': '#9b59b6',
-                                                          'color': 'white', 'border': 'none', 'borderRadius': '4px',
-                                                          'cursor': 'pointer'}),
+                                                           'color': 'white', 'border': 'none', 'borderRadius': '4px',
+                                                           'cursor': 'pointer'}),
                                     ], style={'display': 'flex', 'marginBottom': '5px'}),
 
                                     html.Div(id='export-status', style={'fontSize': '12px', 'color': '#7f8c8d', 'minHeight': '10px'}),
@@ -2888,48 +3094,119 @@ def run_app(initial_file_path, directory_path):
                         }),
                     ]),
 
+                    # ---------------------------------------------------
                     # Polarized Reflectance Tab
+                    # ---------------------------------------------------
+                    # -Enhanced to add multi-file functionality
                     dcc.Tab(label='Polarized Reflectance', value='tab-polarized-reflectance', children=[
                         html.Div([
-                            # LEFT COLUMN - Just info and properties table (no controls)
+                            # LEFT COLUMN - Controls, info and properties table
                             html.Div([
+                                # Analysis Mode Controls
+                                html.Div([
+                                    html.H3("Analysis Mode", style={
+                                        'margin': '0 0 5px 0',
+                                        'color': '#34495e',
+                                        'fontSize': '18px',
+                                        'textDecoration': 'underline',
+                                        'display': 'inline-block'
+                                    }),
+
+                                    # Mode selector
+                                    dcc.RadioItems(
+                                        id='polarized-analysis-mode',
+                                        options=[
+                                            {'label': ' Single File (Measured vs Modeled)', 'value': 'single'},
+                                            {'label': ' Compare Files (File 1 vs File 2)', 'value': 'compare'}
+                                        ],
+                                        value='single',
+                                        style={'margin': '10px 0'},
+                                        labelStyle={'display': 'block', 'margin': '5px 0'}
+                                    ),
+
+                                    # Second file selector (only visible in compare mode)
+                                    html.Div([
+                                        html.Label("File 2 (Compare):", style={
+                                            'fontWeight': 'bold',
+                                            'marginBottom': '5px',
+                                            'display': 'block'
+                                        }),
+                                        dcc.Dropdown(
+                                            id='polarized-file-selector-2',
+                                            placeholder="Select second file for comparison...",
+                                            style={'marginBottom': '15px'}
+                                        ),
+                                    ], id='polarized-file-2-container', style={'display': 'none'}),
+
+                                    # Difference calculation type (only visible when both files selected)
+                                    html.Div([
+                                        html.Label("Comparison Method:", style={
+                                            'fontWeight': 'bold',
+                                            'marginBottom': '5px',
+                                            'display': 'block'
+                                        }),
+                                        dcc.Dropdown(
+                                            id='polarized-difference-type',
+                                            options=[
+                                                {'label': 'Simple Difference (File1 - File2)', 'value': 'simple'},
+                                                {'label': 'Percent Difference ((File1 - File2) / File2 × 100)', 'value': 'percent'}
+                                            ],
+                                            value='simple',
+                                            style={'marginBottom': '15px'}
+                                        ),
+                                    ], id='polarized-difference-container', style={'display': 'none'}),
+
+                                ], style={
+                                    'padding': '15px',
+                                    'border': '1px solid #bdc3c7',
+                                    'borderRadius': '5px',
+                                    'backgroundColor': '#ffffff',
+                                    'marginBottom': '20px'
+                                }),
+
                                 # Info section
                                 html.Div([
                                     html.H3("Polarized Reflectance", style={
+                                        'margin': '0 0 0 0',
+                                        'color': '#34495e',
+                                        'fontSize': '18px',
+                                        'textDecoration': 'underline',
+                                        'display': 'inline-block'
+                                    }),
+
+                                    html.Div([
+                                        html.P("Polarized Reflectance = DoLP × Intensity, based on the point selected in the Individual tab.", 
+                                               style={'margin': '10px 0', 'fontSize': '14px'}),
+                                        html.P([
+                                            html.Strong("Single File Mode: "),
+                                            "Shows measured (solid) vs modeled (dashed) values"
+                                        ], style={'margin': '5px 0', 'fontSize': '13px'}),
+                                        html.P([
+                                            html.Strong("Compare Files Mode: "),
+                                            "Shows File 1 vs File 2 measured and modeled values"
+                                        ], style={'margin': '5px 0', 'fontSize': '13px'}),
+                                    ], style={'fontSize': '14px', 'color': '#555555', 'padding': '10px 0'}),
+                                ], style={
+                                    'padding': '15px',
+                                    'border': '1px solid #bdc3c7',
+                                    'borderRadius': '5px',
+                                    'backgroundColor': '#ffffff',
+                                    'marginBottom': '20px'
+                                }),
+
+                                # Properties table section
+                                html.Div([
+                                    html.H3("Point Properties", style={
                                         'margin': '0 0 10px 0',
                                         'color': '#34495e',
                                         'fontSize': '18px',
                                         'textDecoration': 'underline',
                                         'display': 'inline-block'
                                     }),
-                                    
-                                    html.Div([
-                                        html.P("Polarized Reflectance = DoLP × Intensity, based on the point selected in the Individual tab.", style={
-                                            'fontSize': '12px',
-                                            'color': '#95a5a6',
-                                            'marginBottom': '0px'
-                                        })
-                                    ]),
-                                    
-                                ], style={
-                                    'padding': '15px',
-                                    'border': '1px solid #bdc3c7',
-                                    'borderRadius': '5px',
-                                    'backgroundColor': '#ffffff',
-                                    'marginBottom': '15px'
-                                }),
-
-                                # Selected point properties section (synced from Individual tab)
-                                html.Div([
-                                    html.H3("Selected Point Data", style={
-                                        'margin': '0 0 15px 0',
-                                        'color': '#34495e',
-                                        'fontSize': '18px',
-                                        'textDecoration': 'underline',
-                                        'display': 'inline-block'
-                                    }),
-                                    html.Div(id='polarized-click-info', style={'marginBottom': '15px', 'fontSize': '14px'}),
-                                    html.Div(id='polarized-panel-properties-table', style={'maxHeight': '400px', 'overflowY': 'auto'}),
+                                    html.Div(
+                                        id='polarized-panel-properties-table',
+                                        style={'overflowX': 'auto', 'fontSize': '12px'}
+                                    )
                                 ], style={
                                     'padding': '15px',
                                     'border': '1px solid #bdc3c7',
@@ -2951,7 +3228,7 @@ def run_app(initial_file_path, directory_path):
                             ], style={
                                 'flex': '0 0 74%'  # Combined size of middle and right columns like residual tab
                             }),
-                            
+
                         ], style={
                             'display': 'flex',
                             'flexDirection': 'row',
@@ -2960,8 +3237,81 @@ def run_app(initial_file_path, directory_path):
                         }),
                     ]),
 
+                    # END POL REF
+                    # dcc.Tab(label='Polarized Reflectance', value='tab-polarized-reflectance', children=[
+                    #     html.Div([
+                    #         # LEFT COLUMN - Just info and properties table (no controls)
+                    #         html.Div([
+                    #             # Info section
+                    #             html.Div([
+                    #                 html.H3("Polarized Reflectance", style={
+                    #                     'margin': '0 0 10px 0',
+                    #                     'color': '#34495e',
+                    #                     'fontSize': '18px',
+                    #                     'textDecoration': 'underline',
+                    #                     'display': 'inline-block'
+                    #                 }),
 
+                    #                 html.Div([
+                    #                     html.P("Polarized Reflectance = DoLP × Intensity, based on the point selected in the Individual tab.", style={
+                    #                         'fontSize': '12px',
+                    #                         'color': '#95a5a6',
+                    #                         'marginBottom': '0px'
+                    #                     })
+                    #                 ]),
+
+                    #             ], style={
+                    #                 'padding': '15px',
+                    #                 'border': '1px solid #bdc3c7',
+                    #                 'borderRadius': '5px',
+                    #                 'backgroundColor': '#ffffff',
+                    #                 'marginBottom': '15px'
+                    #             }),
+
+                    #             # Selected point properties section (synced from Individual tab)
+                    #             html.Div([
+                    #                 html.H3("Selected Point Data", style={
+                    #                     'margin': '0 0 15px 0',
+                    #                     'color': '#34495e',
+                    #                     'fontSize': '18px',
+                    #                     'textDecoration': 'underline',
+                    #                     'display': 'inline-block'
+                    #                 }),
+                    #                 html.Div(id='polarized-click-info', style={'marginBottom': '15px', 'fontSize': '14px'}),
+                    #                 html.Div(id='polarized-panel-properties-table', style={'maxHeight': '400px', 'overflowY': 'auto'}),
+                    #             ], style={
+                    #                 'padding': '15px',
+                    #                 'border': '1px solid #bdc3c7',
+                    #                 'borderRadius': '5px',
+                    #                 'backgroundColor': '#ffffff'
+                    #             }),
+
+                    #         ], style={
+                    #             'flex': '0 0 25%',
+                    #             'marginRight': '1%'
+                    #         }),
+
+                    #         # RIGHT COLUMN - Polarized Reflectance plot (taking up the space of middle + right)
+                    #         html.Div([
+                    #             dcc.Graph(
+                    #                 id='polarized-reflectance-plot',
+                    #                 style={'height': '800px', 'border': '1px solid #bdc3c7', 'borderRadius': '5px'}
+                    #             ),
+                    #         ], style={
+                    #             'flex': '0 0 74%'  # Combined size of middle and right columns like residual tab
+                    #         }),
+
+                    #     ], style={
+                    #         'display': 'flex',
+                    #         'flexDirection': 'row',
+                    #         'padding': '0 20px',
+                    #         'gap': '0px'
+                    #     }),
+                    # ]),
+
+                    # ---------------------------------------------------
                     # Residual Tab
+                    # ---------------------------------------------------
                     dcc.Tab(label='Residual', value='tab-residual', children=[
                         html.Div([
                             # LEFT COLUMN - Controls
@@ -3010,7 +3360,7 @@ def run_app(initial_file_path, directory_path):
                                               {'label': 'DoLP Residual', 'value': 'dolp'},
                                               {'label': 'Both Residuals', 'value': 'both'}
                                           ],
-                                          value='both',  # picks both as a defulat
+                                          value='both',  # picks both as a default
                                           style={
                                               'marginBottom': '25px',
                                               'height': '24px',
@@ -3066,18 +3416,18 @@ def run_app(initial_file_path, directory_path):
                             'gap': '0px'
                         }),
                     ]),
+                    # ---------------------------------------------------
                     # Histogram Tab
+                    # ---------------------------------------------------
                     dcc.Tab(label='Histogram', value='tab-histogram', children=[
                       html.Div([
                           html.H2("AOD Frequency Distribution",
                                   style={'textAlign': 'center', 'marginBottom': '20px'}),
-
                           html.Div([
                               html.P([
                                   "This histogram shows the frequency distribution of AOD values for the selected property and cost filter. ",
                                   "Use the controls in the Individual visualization tab to select different wavelengths and adjust the cost threshold."
                               ], style={'textAlign': 'center', 'marginBottom': '20px', 'fontSize': '14px'}),
-
                               dcc.Graph(
                                   id='aod-histogram',
                                   config={
@@ -3087,102 +3437,109 @@ def run_app(initial_file_path, directory_path):
                                   }
                               )
                           ], style={'padding': '0 20px'})
-
                       ], style={'padding': '20px'})
-                  ]),
+                    ]),
 
-                  # Total AOD tab
-                  dcc.Tab(label='AOD Total', value='tab-aod-total', children=[
-                    html.Div([
-                        # LEFT COLUMN - Info and properties table 
+                    # ---------------------------------------------------
+                    # Total AOD tab
+                    # ---------------------------------------------------
+                    dcc.Tab(label='AOD Total', value='tab-aod-total', children=[
                         html.Div([
-                            # Info section
+
+                            # LEFT COLUMN - Info and properties table
                             html.Div([
-                                html.H3("Total AOD vs Wavelength", style={
-                                    'margin': '0 0 10px 0',
-                                    'color': '#34495e',
-                                    'fontSize': '18px',
-                                    'textDecoration': 'underline',
-                                    'display': 'inline-block'
-                                }),
-                                
+                                # Info section
                                 html.Div([
-                                    html.P("This plot shows the total aerosol optical depth (AOD) as a function of wavelength for the point selected in the Individual tab.", style={
-                                        'fontSize': '12px',
-                                        'color': '#95a5a6',
-                                        'marginBottom': '10px'
+                                    html.H3("Total AOD vs Wavelength", style={
+                                        'margin': '0 0 10px 0',
+                                        'color': '#34495e',
+                                        'fontSize': '18px',
+                                        'textDecoration': 'underline',
+                                        'display': 'inline-block'
                                     }),
-                                    html.P("The wavelength dependence of AOD provides insights into aerosol particle size distribution and composition.", style={
-                                        'fontSize': '12px',
-                                        'color': '#95a5a6',
-                                        'marginBottom': '0px'
-                                    })
-                                ]),
-                                
-                            ], style={
-                                'padding': '15px',
-                                'border': '1px solid #bdc3c7',
-                                'borderRadius': '5px',
-                                'backgroundColor': '#ffffff',
-                                'marginBottom': '15px'
-                            }),
-
-                            # Selected point properties section (synced from Individual tab)
-                            html.Div([
-                                html.H3("Selected Point Data", style={
-                                    'margin': '0 0 15px 0',
-                                    'color': '#34495e',
-                                    'fontSize': '18px',
-                                    'textDecoration': 'underline',
-                                    'display': 'inline-block'
+                                    html.Div([
+                                        html.P("This plot shows the total aerosol optical depth (AOD) as a function of wavelength for the point selected in the Individual tab.", style={
+                                            'fontSize': '12px',
+                                            'color': '#95a5a6',
+                                            'marginBottom': '10px'
+                                        }),
+                                        html.P("The wavelength dependence of AOD provides insights into aerosol particle size distribution and composition.", style={
+                                            'fontSize': '12px',
+                                            'color': '#95a5a6',
+                                            'marginBottom': '0px'
+                                        })
+                                    ]),
+                                ], style={
+                                    'padding': '15px',
+                                    'border': '1px solid #bdc3c7',
+                                    'borderRadius': '5px',
+                                    'backgroundColor': '#ffffff',
+                                    'marginBottom': '15px'
                                 }),
-                                html.Div(id='aod-total-click-info', style={'marginBottom': '15px', 'fontSize': '14px'}),
-                                html.Div(id='aod-total-panel-properties-table', style={'maxHeight': '400px', 'overflowY': 'auto'}),
+
+                                # Selected point properties section (synced from Individual tab)
+                                html.Div([
+                                    html.H3("Selected Point Data", style={
+                                        'margin': '0 0 15px 0',
+                                        'color': '#34495e',
+                                        'fontSize': '18px',
+                                        'textDecoration': 'underline',
+                                        'display': 'inline-block'
+                                    }),
+                                    html.Div(id='aod-total-click-info', style={'marginBottom': '15px', 'fontSize': '14px'}),
+                                    html.Div(id='aod-total-panel-properties-table', style={'maxHeight': '400px', 'overflowY': 'auto'}),
+                                ], style={
+                                    'padding': '15px',
+                                    'border': '1px solid #bdc3c7',
+                                    'borderRadius': '5px',
+                                    'backgroundColor': '#ffffff'
+                                }),
+
                             ], style={
-                                'padding': '15px',
-                                'border': '1px solid #bdc3c7',
-                                'borderRadius': '5px',
-                                'backgroundColor': '#ffffff'
+                                'flex': '0 0 25%',
+                                'marginRight': '1%'
+                            }),
+
+                            # RIGHT COLUMN - AOD Total plot (taking up the space of middle + right)
+                            html.Div([
+                                dcc.Graph(
+                                    id='aod-total-plot',
+                                    style={'height': '800px', 'border': '1px solid #bdc3c7', 'borderRadius': '5px'}
+                                ),
+                            ], style={
+                                'flex': '0 0 74%'  # Combined size of middle and right columns
                             }),
 
                         ], style={
-                            'flex': '0 0 25%',
-                            'marginRight': '1%'
+                            'display': 'flex',
+                            'flexDirection': 'row',
+                            'padding': '0 20px',
+                            'gap': '0px'
                         }),
-
-                        # RIGHT COLUMN - AOD Total plot (taking up the space of middle + right)
-                        html.Div([
-                            dcc.Graph(
-                                id='aod-total-plot',
-                                style={'height': '800px', 'border': '1px solid #bdc3c7', 'borderRadius': '5px'}
-                            ),
-                        ], style={
-                            'flex': '0 0 74%'  # Combined size of middle and right columns
-                        }),
-                        
-                    ], style={
-                        'display': 'flex',
-                        'flexDirection': 'row',
-                        'padding': '0 20px',
-                        'gap': '0px'
-                    }),
                     ]),
                 ]),
             ], style={'backgroundColor': '#ecf0f1', 'minHeight': '100vh', 'padding': '20px 0'})
             # END of APP LAYOUT
 
-
             # Begin Callbacks
-            # AOD TOTAL PLOT CALLBACKS
-            # Callback to update aod-total-click-info with the same data as click-info
+            # ---------------------------------------------------
+            # TOTAL AOD CALLBACK #1 (1 of 18 total)
+            #   -Update aod-total-click-info with the same data
+            #   as click-info
+            # ---------------------------------------------------
             @app.callback(
                 Output('aod-total-click-info', 'children'),
                 Input('click-info', 'children')
             )
             def sync_aod_total_click_info(click_info_content):
+                print("Doing callback: sync_aod_total_click_info")
                 return click_info_content
 
-            # Callback to update the aod-total-panel-properties-table based on clicked point
+            # ---------------------------------------------------
+            # TOTAL AOD CALLBACK #2 (2 of 18 total)
+            #   -Update the aod-total-panel-properties-table based
+            #   on clicked point
+            # ---------------------------------------------------
             @app.callback(
                 Output('aod-total-panel-properties-table', 'children'),
                 Input('panel-properties-table', 'children'),
@@ -3190,6 +3547,7 @@ def run_app(initial_file_path, directory_path):
                 Input('visualization-tabs', 'value')
             )
             def update_aod_total_panel_properties(properties_table_content, clicked_data, active_tab):
+                print("Doing callback: update_aod_total_panel_properties")
                 # Empty if not on aod total tab
                 if active_tab != 'tab-aod-total':
                     return []
@@ -3201,14 +3559,18 @@ def run_app(initial_file_path, directory_path):
                 # Use the same table as the one in the main visualization
                 return properties_table_content
 
-            # Callback to update the AOD total plot
+            # ---------------------------------------------------
+            # TOTAL AOD CALLBACK #3 (3 of 18 total)
+            #   -Callback to update the AOD total plot
+            # ---------------------------------------------------
             @app.callback(
                 Output('aod-total-plot', 'figure'),
                 [Input('file-selector', 'value'),
-                Input('clicked-point-store', 'data'),
-                Input('visualization-tabs', 'value')]
+                 Input('clicked-point-store', 'data'),
+                 Input('visualization-tabs', 'value')]
             )
             def update_aod_total_plot(file_path, clicked_data, active_tab):
+                print("Doing callback: update_aod_total_plot")
                 """
                 Updated callback for AOD total plot that uses actual data
                 """
@@ -3267,18 +3629,20 @@ def run_app(initial_file_path, directory_path):
                 # Create the AOD total plot
                 return create_aod_total_plot(data_dict, selected_row, selected_col)
 
-            # AOD HISTOGRAM CALLBACKS
+            # ---------------------------------------------------
+            # AOD HISTOGRAM CALLBACK (4 of 18 total)
+            # ---------------------------------------------------
             @app.callback(
               Output('aod-histogram', 'figure'),
               [Input('property-selector', 'value'),
-              Input('cost-input', 'value'),
-              Input('current-file-data', 'data')]
+               Input('cost-input', 'value'),
+               Input('current-file-data', 'data')]
               )
-
             def update_histogram(selected_property, max_cost, current_file_data):
                 """
                 Update histogram based on selected property and cost threshold
                 """
+                print("Doing callback: update_histogram")
 
                 # Check if we have valid inputs
                 if current_file_data is None or selected_property is None:
@@ -3318,7 +3682,7 @@ def run_app(initial_file_path, directory_path):
                     # Use 200 as a default max cost if not given
                     if max_cost is None:
                         max_cost = current_file_data.get('max_cost_value', 200.0)
-                        
+
                     # Create the histogram
                     histogram_fig = create_aod_histogram(data_dict, selected_property, max_cost)
                     return histogram_fig
@@ -3340,9 +3704,12 @@ def run_app(initial_file_path, directory_path):
                         height=500
                     )
                     return error_fig
-            
-            # POLARIZED REFLECTANCE PLOT CALLBACKS
-            # Callback to update the polarized-panel-properties-table based on clicked point
+
+            # ---------------------------------------------------
+            # POLARIZED REFLECTANCE CALLBACK #1 (5 of 18 total)
+            #   -Update the polarized-panel-properties-table based
+            #   on clicked point
+            # ---------------------------------------------------
             @app.callback(
                 Output('polarized-panel-properties-table', 'children'),
                 Input('panel-properties-table', 'children'),
@@ -3350,6 +3717,7 @@ def run_app(initial_file_path, directory_path):
                 Input('visualization-tabs', 'value')
             )
             def update_polarized_panel_properties(properties_table_content, clicked_data, active_tab):
+                print("Doing callback: update_polarized_panel_properties")
                 # Empty if not on polarized reflectance tab
                 if active_tab != 'tab-polarized-reflectance':
                     return []
@@ -3361,19 +3729,26 @@ def run_app(initial_file_path, directory_path):
                 # Use the same table as the one in the main visualization
                 return properties_table_content
 
-            # Callback to update the polarized plot
+            # ---------------------------------------------------
+            # POLARIZED REFLECTANCE CALLBACK #2 (6 of 18 total)
+            #   -Update the polarized plot
+            #   -Enhanced callback for polarized reflectance plot
+            # ---------------------------------------------------
             @app.callback(
                 Output('polarized-reflectance-plot', 'figure'),
                 [Input('file-selector', 'value'),
-                Input('clicked-point-store', 'data'),
-                Input('visualization-tabs', 'value')]
+                 Input('polarized-file-selector-2', 'value'),
+                 Input('polarized-analysis-mode', 'value'),
+                 Input('polarized-difference-type', 'value'),
+                 Input('clicked-point-store', 'data'),
+                 Input('visualization-tabs', 'value')]
             )
-            def update_polarized_reflectance_plot(file_path, clicked_data, active_tab):
+            def update_polarized_reflectance_plot(file_path_1, file_path_2, analysis_mode, difference_type, clicked_data, active_tab):
                 """
-                Updated callback for polarized reflectance plot that uses actual data
+                Enhanced callback for polarized reflectance plot with dual-file comparison capability
                 """
+                print("Doing callback: update_polarized_reflectance_plot")
                 if active_tab != 'tab-polarized-reflectance':
-                    # Empty figure
                     return go.Figure()
 
                 # Check if we have a selected point
@@ -3402,7 +3777,7 @@ def run_app(initial_file_path, directory_path):
                 if selected_row is None or selected_col is None:
                     fig = go.Figure()
                     fig.add_annotation(
-                        text="Invalid point used! Please select a point again.",
+                        text="Invalid point selected! Please select a point again.",
                         xref="paper", yref="paper",
                         x=0.5, y=0.5,
                         showarrow=False,
@@ -3410,30 +3785,66 @@ def run_app(initial_file_path, directory_path):
                     )
                     return fig
 
-                # Load the data for the current file
                 try:
-                    data_dict, _, _, _ = read_hdf5_variables(file_path)
-                except Exception as e:
-                    fig = go.Figure()
-                    fig.add_annotation(
-                        text=f"Error loading data: {str(e)}",
-                        xref="paper", yref="paper",
-                        x=0.5, y=0.5,
-                        showarrow=False,
-                        font=dict(size=16, color="red")
-                    )
-                    return fig
+                    if analysis_mode == 'single':
+                        # SINGLE FILE MODE - Current behavior (measured vs modeled)
+                        if not file_path_1:
+                            raise ValueError("No file selected")
 
-                # Create the polarized reflectance plot
-                try:
-                    # Use the same function as residual plot
-                    intensity_data, dolp_data, wavelengths = get_channel_intensity_dolp_vza(
-                        data_dict, selected_row, selected_col
-                    )
-                    wl_colors = generate_wavelength_colors(wavelengths)
-                    
-                    return create_polarized_reflectance_plot(intensity_data, dolp_data, wavelengths, wl_colors)
-                    
+                        # Load data for file 1
+                        data_dict, _, _, _ = read_hdf5_variables(file_path_1)
+                        intensity_data, dolp_data, wavelengths = get_channel_intensity_dolp_vza(
+                            data_dict, selected_row, selected_col
+                        )
+                        wl_colors = generate_wavelength_colors(wavelengths)
+
+                        # Use existing function
+                        return create_polarized_reflectance_plot(intensity_data, dolp_data, wavelengths, wl_colors)
+
+                    else:
+                        # COMPARE FILES MODE - File 1 vs File 2
+                        if not file_path_1 or not file_path_2:
+                            fig = go.Figure()
+                            fig.add_annotation(
+                                text="Please select both files for comparison",
+                                xref="paper", yref="paper",
+                                x=0.5, y=0.5,
+                                showarrow=False,
+                                font=dict(size=16, color="orange")
+                            )
+                            fig.update_layout(
+                                title="Polarized Reflectance Comparison",
+                                xaxis_title="Viewing Zenith Angle (degrees)",
+                                yaxis_title="Polarized Reflectance (DoLP × Intensity)",
+                                height=800,
+                                margin=dict(l=50, r=40, t=60, b=40)
+                            )
+                            return fig
+
+                        # Load data for both files
+                        data_dict_1, _, _, _ = read_hdf5_variables(file_path_1)
+                        data_dict_2, _, _, _ = read_hdf5_variables(file_path_2)
+
+                        # Get data for the same point from both files
+                        intensity_data_1, dolp_data_1, wavelengths_1 = get_channel_intensity_dolp_vza(
+                            data_dict_1, selected_row, selected_col
+                        )
+                        intensity_data_2, dolp_data_2, wavelengths_2 = get_channel_intensity_dolp_vza(
+                            data_dict_2, selected_row, selected_col
+                        )
+
+                        # Use wavelengths from first file for consistency
+                        wavelengths = wavelengths_1
+                        wl_colors = generate_wavelength_colors(wavelengths)
+
+                        # Create comparison plot
+                        return create_polarized_reflectance_comparison_plot(
+                            intensity_data_1, dolp_data_1,
+                            intensity_data_2, dolp_data_2,
+                            wavelengths, wl_colors,
+                            file_path_1, file_path_2, difference_type or 'simple'
+                        )
+
                 except Exception as e:
                     fig = go.Figure()
                     fig.add_annotation(
@@ -3447,21 +3858,154 @@ def run_app(initial_file_path, directory_path):
                         title="Polarized Reflectance Analysis - Error",
                         xaxis_title="Viewing Zenith Angle (degrees)",
                         yaxis_title="Polarized Reflectance (DoLP × Intensity)",
-                        height=800
+                        height=800,
+                        margin=dict(l=50, r=40, t=60, b=40)
                     )
                     return fig
 
-            # SYNCING POINT TABLE CALLBACKS
-            # Callback to update polarized-click-info with the same data as click-info
+            # Previous pol ref plot callback
+            # @app.callback(
+            #     Output('polarized-reflectance-plot', 'figure'),
+            #     [Input('file-selector', 'value'),
+            #      Input('clicked-point-store', 'data'),
+            #      Input('visualization-tabs', 'value')]
+            # )
+            # def update_polarized_reflectance_plot(file_path, clicked_data, active_tab):
+            #     """
+            #     Updated callback for polarized reflectance plot that uses actual data
+            #     """
+            #     if active_tab != 'tab-polarized-reflectance':
+            #         # Empty figure
+            #         return go.Figure()
+
+            #     # Check if we have a selected point
+            #     if clicked_data is None:
+            #         fig = go.Figure()
+            #         fig.add_annotation(
+            #             text="Click on a point in the Individual tab to see polarized reflectance",
+            #             xref="paper", yref="paper",
+            #             x=0.5, y=0.5,
+            #             showarrow=False,
+            #             font=dict(size=16, color="#7f8c8d")
+            #         )
+            #         fig.update_layout(
+            #             title="Polarized Reflectance Analysis",
+            #             xaxis_title="Viewing Zenith Angle (degrees)",
+            #             yaxis_title="Polarized Reflectance (DoLP × Intensity)",
+            #             height=800,
+            #             margin=dict(l=50, r=40, t=60, b=40)
+            #         )
+            #         return fig
+
+            #     # Get the selected point data
+            #     selected_row = clicked_data.get('row')
+            #     selected_col = clicked_data.get('col')
+
+            #     if selected_row is None or selected_col is None:
+            #         fig = go.Figure()
+            #         fig.add_annotation(
+            #             text="Invalid point used! Please select a point again.",
+            #             xref="paper", yref="paper",
+            #             x=0.5, y=0.5,
+            #             showarrow=False,
+            #             font=dict(size=16, color="red")
+            #         )
+            #         return fig
+
+            #     # Load the data for the current file
+            #     try:
+            #         data_dict, _, _, _ = read_hdf5_variables(file_path)
+            #     except Exception as e:
+            #         fig = go.Figure()
+            #         fig.add_annotation(
+            #             text=f"Error loading data: {str(e)}",
+            #             xref="paper", yref="paper",
+            #             x=0.5, y=0.5,
+            #             showarrow=False,
+            #             font=dict(size=16, color="red")
+            #         )
+            #         return fig
+
+            #     # Create the polarized reflectance plot
+            #     try:
+            #         # Use the same function as residual plot
+            #         intensity_data, dolp_data, wavelengths = get_channel_intensity_dolp_vza(
+            #             data_dict, selected_row, selected_col
+            #         )
+            #         wl_colors = generate_wavelength_colors(wavelengths)
+
+            #         return create_polarized_reflectance_plot(intensity_data, dolp_data, wavelengths, wl_colors)
+
+            #     except Exception as e:
+            #         fig = go.Figure()
+            #         fig.add_annotation(
+            #             text=f"Error creating polarized reflectance plot: {str(e)}",
+            #             xref="paper", yref="paper",
+            #             x=0.5, y=0.5,
+            #             showarrow=False,
+            #             font=dict(size=16, color="red")
+            #         )
+            #         fig.update_layout(
+            #             title="Polarized Reflectance Analysis - Error",
+            #             xaxis_title="Viewing Zenith Angle (degrees)",
+            #             yaxis_title="Polarized Reflectance (DoLP × Intensity)",
+            #             height=800
+            #         )
+            #         return fig
+
+            # ---------------------------------------------------
+            # POLARIZED REFLECTANCE CALLBACK #3 (6 of 19 total)
+            #   -Show/hide second file selector
+            # ---------------------------------------------------
+            # Additional callback to show/hide second file selector based on mode
+            @app.callback(
+                [Output('polarized-file-2-container', 'style'),
+                 Output('polarized-file-selector-2', 'options'),
+                 Output('polarized-difference-container', 'style')],
+                [Input('polarized-analysis-mode', 'value'),
+                 Input('file-selector', 'options'),
+                 Input('polarized-file-selector-2', 'value')]
+            )
+            def toggle_polarized_controls_visibility(analysis_mode, available_files, file2_selected):
+                """Show/hide second file selector and difference type based on analysis mode and file selection"""
+                print("Doing callback: toggle_polarized_controls_visibility")
+                if analysis_mode == 'compare':
+                    # Show the second file selector
+                    file2_style = {'display': 'block', 'marginTop': '15px'}
+                    # Copy options from main file selector
+                    file_options = available_files if available_files else []
+
+                    # Show difference type dropdown only if second file is selected
+                    if file2_selected:
+                        diff_style = {'display': 'block', 'marginTop': '15px'}
+                    else:
+                        diff_style = {'display': 'none'}
+                else:
+                    # Hide both selectors in single file mode
+                    file2_style = {'display': 'none'}
+                    file_options = []
+                    diff_style = {'display': 'none'}
+
+                return file2_style, file_options, diff_style
+
+            # ---------------------------------------------------
+            # SYNCING POINT TABLE CALLBACK (7 of 18 total)
+            #   -Update polarized-click-info with the same data
+            #   as click-info
+            # ---------------------------------------------------
             @app.callback(
                 Output('polarized-click-info', 'children'),
                 Input('click-info', 'children')
             )
             def sync_polarized_click_info(click_info_content):
+                print("Doing callback: sync_polarized_click_info")
                 return click_info_content
 
-            # RESIDUAL PLOT CALLBACKS
-            # Callback to update the residual-panel-properties-table based on clicked poin
+            # ---------------------------------------------------
+            # RESIDUAL PLOT CALLBACK #1 (8 of 18 total)
+            #   -Update the residual-panel-properties-table based
+            #   on clicked point
+            # ---------------------------------------------------
             @app.callback(
                 Output('residual-panel-properties-table', 'children'),
                 Input('panel-properties-table', 'children'),
@@ -3469,9 +4013,10 @@ def run_app(initial_file_path, directory_path):
                 Input('visualization-tabs', 'value')
               )
             def update_residual_panel_properties(properties_table_content, clicked_data, active_tab):
+                print("Doing callback: update_residual_panel_properties")
                 # Empty if not on residual tab
                 if active_tab != 'tab-residual':
-                  return []
+                    return []
 
                 # If no point clicked yet
                 if clicked_data is None:
@@ -3480,18 +4025,22 @@ def run_app(initial_file_path, directory_path):
                 # Use the same table as the one in the main visualization
                 return properties_table_content
 
-            # Callack to update the residual plot with current one
+            # ---------------------------------------------------
+            # RESIDUAL PLOT CALLBACK #2 (9 of 18 total)
+            #   -Update the residual plot with current one
+            # ---------------------------------------------------
             @app.callback(
                 Output('residual-plot', 'figure'),
                 [Input('residual-file-selector', 'value'),
-                Input('residual-type-selector', 'value'),
-                Input('clicked-point-store', 'data'),
-                Input('visualization-tabs', 'value')]
+                 Input('residual-type-selector', 'value'),
+                 Input('clicked-point-store', 'data'),
+                 Input('visualization-tabs', 'value')]
             )
             def update_residual_plot(file_path, residual_type, clicked_data, active_tab):
                 """
                 Updated callback for residual plot that uses actual data
                 """
+                print("Doing callback: update_residual_plot")
                 if active_tab != 'tab-residual':
                     # Return empty figure when not on residual tab
                     return go.Figure()
@@ -3552,26 +4101,35 @@ def run_app(initial_file_path, directory_path):
                 else:
                     return create_residual_plot(data_dict, selected_row, selected_col, 'both')
 
-            # SYNCING POINT TABLE CALLBACKS
-            # Callback to update residual-click-info with the same data as click-info
+            # ---------------------------------------------------
+            # SYNCING POINT TABLE CALLBACK (10 of 18 total)
+            #   -Update residual-click-info with the same data
+            #   as click-info
+            # ---------------------------------------------------
             @app.callback(
                 Output('residual-click-info', 'children'),
                 Input('click-info', 'children')
             )
             def sync_click_info(click_info_content):
+                print("Doing callback: sync_click_info")
                 return click_info_content
 
-            # TAB CALLBACKS
-            # Keep file selector the same for both pages so that they are synced
+            # ---------------------------------------------------
+            # TAB CALLBACKS (11 of 18 total)
+            #   -Keep file selector same for both pages so they are synced
+            # ---------------------------------------------------
             @app.callback(
                 Output('residual-file-selector', 'value'),
                 Input('file-selector', 'value')
             )
             def sync_file_selectors(file_selector_value):
+                print("Doing callback: sync_file_selectors")
                 return file_selector_value
 
+            # ---------------------------------------------------
             # 1. DATA/FILE MANAGEMENT CALLBACKS (highest level)
-            # File selector callback
+            # FILE SELECTOR CALLBACK (12 of 18 total)
+            # ---------------------------------------------------
             @app.callback(
                 [Output('property-selector', 'options'),
                  Output('property-selector', 'value'),
@@ -3579,15 +4137,19 @@ def run_app(initial_file_path, directory_path):
                  Output('cost-input', 'max'),
                  Output('cost-input', 'value'),
                  Output('clicked-point-store', 'data')],
-                [Input('file-selector', 'value')]
+                [Input('file-selector', 'value')],
+                prevent_initial_call=True
             )
             def update_file_selection(selected_file_path):
+                print("Doing callback: update_file_selections")
                 # Read new file
                 try:
                     new_data_dict, new_sorted_variables, new_display_names, new_variable_metadata = read_hdf5_variables(selected_file_path)
 
                     # Get new max cost value
                     new_max_cost_value = np.nanmax(new_data_dict['cost_function'])
+                    # new_default_cost_value = min(0.7, new_max_cost_value)
+                    new_default_cost_value = min(default_cost, new_max_cost_value)
 
                     # Create new dropdown options
                     new_dropdown_options = create_dropdown_options(new_sorted_variables, new_display_names, new_variable_metadata)
@@ -3614,8 +4176,10 @@ def run_app(initial_file_path, directory_path):
                         new_dropdown_options,
                         new_default_var,
                         new_file_data,
-                        new_max_cost_value,
-                        new_max_cost_value,
+                        # new_max_cost_value,
+                        min(default_cost, new_max_cost_value),
+                        # new_max_cost_value,
+                        new_default_cost_value,
                         None
                     )
 
@@ -3624,8 +4188,9 @@ def run_app(initial_file_path, directory_path):
                     # If error, return current values
                     raise dash.exceptions.PreventUpdate
 
-            # INPUT VALIDATION CALLBACKS
-            # Cost function filter callback
+            # ---------------------------------------------------
+            # COST FUNCTION FILTER CALLBACK (13 of 18 total)
+            # ---------------------------------------------------
             @app.callback(
                 [Output('cost-input', 'value', allow_duplicate=True),
                  Output('cost-input-message', 'children')],
@@ -3635,6 +4200,7 @@ def run_app(initial_file_path, directory_path):
                 prevent_initial_call='initial_duplicate'
             )
             def validate_cost_input(n_clicks, input_value, current_file_data):
+                print("Doing callback: validate_cost_input")
                 # Debugging
                 if debug > 1:
                     print("Current file data:", current_file_data)
@@ -3652,7 +4218,8 @@ def run_app(initial_file_path, directory_path):
                     print("Max cost value:", max_cost_value)
 
                 if input_value is None:
-                    return max_cost_value, "Using maximum cost value"
+                    # return max_cost_value, "Using maximum cost value"
+                    return min(default_cost, max_cost_value), f"Using default cost value ({default_cost})"
 
                 # Ensure cost val is within bounds
                 if input_value < 0:
@@ -3664,6 +4231,9 @@ def run_app(initial_file_path, directory_path):
                 return input_value, f"Using cost threshold: {input_value:.2f}"
 
             # 3. UI SYNCHRONIZATION CALLBACKS
+            # ---------------------------------------------------
+            # LAT-LON INPUT CALLBACK (14 of 18 total)
+            # ---------------------------------------------------
             @app.callback(
                     [Output('latitude-input', 'value'),
                      Output('longitude-input', 'value')],
@@ -3672,6 +4242,7 @@ def run_app(initial_file_path, directory_path):
                      State('current-file-data', 'data')]
                     )
             def update_latlon_inputs(clickData, stored_point_data, current_file_data):
+                print("Doing callback: update_latlon_inputs")
                 # if point is clicked on map, update the text boxes
                 if clickData is not None:
                     try:
@@ -3707,7 +4278,10 @@ def run_app(initial_file_path, directory_path):
                 # Default - no values
                 return None, None
 
-            # MAIN VISUALIZATION CALLBACK (core functionality)
+            # ---------------------------------------------------
+            # MAIN VISUALIZATION CALLBACK (15 of 18 total)
+            #   -Core functionality
+            # ---------------------------------------------------
             @app.callback(
                 [Output('aerosol-plot', 'figure'),
                  Output('combined-plot', 'figure'),
@@ -3723,13 +4297,23 @@ def run_app(initial_file_path, directory_path):
                  State('longitude-input', 'value'),
                  State('clicked-point-store', 'data')],
                 prevent_initial_call='initial_duplicate'
+                # prevent_initial_call=True
             )
             def update_all_plots(selected_property, max_cost, clickData, find_button_clicks,
                                  current_file_data, input_lat, input_lon, stored_point_data):
+                print("Doing callback: update_all_plots")
 
                 # Determine which input triggered callback
                 ctx = callback_context
                 trigger_id = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else None
+
+                # Do the below to preserve the zoom before and after any clicks
+                # have been made
+                has_active_click = clickData is not None and 'points' in clickData
+                if has_active_click:
+                    uirevision_value = "preserve-zoom"
+                else:
+                    uirevision_value = "preserve-zoom"
 
                 # Use the current file data instead of global data_dict
                 if current_file_data is None:
@@ -3805,6 +4389,9 @@ def run_app(initial_file_path, directory_path):
                 # Create the main scatter plot
                 scatter_fig = create_scatter_plot_only(filtered_data, selected_property, original_indices, clicked_point_data, max_cost)
 
+                # Preserve the zoom when updating the figure with uirevision
+                scatter_fig.update_layout(uirevision=uirevision_value)
+
                 # Create intensity and DoLP plots (first below is pre-click)
                 combined_fig = go.Figure()
 
@@ -3860,7 +4447,6 @@ def run_app(initial_file_path, directory_path):
                     lon = data_dict['longitude'][selected_row, selected_col]
                     sza = data_dict['sza'][selected_row, selected_col]
                     raa = data_dict['raa'][selected_row, selected_col]
-                    
 
                     if filtered_data[selected_property].ndim == 2:
                         val = filtered_data[selected_property][selected_row, selected_col]
@@ -3877,9 +4463,9 @@ def run_app(initial_file_path, directory_path):
                     click_info = html.Div([
                         html.Strong("Location: "), f"Lat {lat:.4f}°, Lon {lon:.4f}°",
                         html.Br(),
-                        html.Strong("SZA: "), f"{sza[0]:.3f}",
+                        html.Strong("SZA: "), f"{np.degrees(np.arccos(sza[0])):.3f}°",
                         html.Br(),
-                        html.Strong("RAA: "), f"{raa[0]:.3f}",
+                        html.Strong("RAA: "), f"{raa[0]:.3f}°",
                         html.Br(),
                         html.Strong("Selected: "), f"{selected_property} = {val:.3f}",
                         html.Br(),
@@ -3891,21 +4477,27 @@ def run_app(initial_file_path, directory_path):
                 return (scatter_fig, combined_fig,
                         clicked_point_data, click_info, properties_table)
 
-            # 5. EXPORT CALLBACKS
-            # 1. First callback updates the status message immediately
+            # ---------------------------------------------------
+            # EXPORT CALLBACK #1 (16 of 18 total)
+            #   1. First callback updates the status message immediately
+            # ---------------------------------------------------
             @app.callback(
                 Output('export-status', 'children'),
                 Input('export-button', 'n_clicks'),
                 prevent_initial_call=True
             )
             def update_export_status(n_clicks):
+                print("Doing callback: update_export_status")
                 if n_clicks is None or n_clicks == 0:
                     return ""
 
                 return "Processing export... ⏳"
 
-            # 2. Second handles the actual export as png (updated to also use
-            # current_file_data)
+            # ---------------------------------------------------
+            # EXPORT CALLBACK #2 (17 of 18 total)
+            #   2. Second handles the actual export as png (updated to also use
+            #   current_file_data)
+            # ---------------------------------------------------
             @app.callback(
                 [Output('download-image', 'data'),
                  Output('export-status', 'children', allow_duplicate=True)],
@@ -3917,6 +4509,7 @@ def run_app(initial_file_path, directory_path):
                 prevent_initial_call=True
             )
             def generate_image_download(n_clicks, selected_property, max_cost, clicked_point_data, current_file_data):
+                print("Doing callback: generate_image_download")
                 if n_clicks is None or n_clicks == 0:
                     return no_update, no_update
 
@@ -3960,7 +4553,10 @@ def run_app(initial_file_path, directory_path):
                     traceback.print_exc()
                     return no_update, f"Error: {str(e)}"
 
-            # Export as kml callback
+            # ---------------------------------------------------
+            # EXPORT CALLBACK #3 (18 of 18 total)
+            #   -export as kml callback
+            # ---------------------------------------------------
             @app.callback(
                 Output('download-image', 'data', allow_duplicate=True),
                 Input('export-kml-button', 'n_clicks'),
@@ -3971,6 +4567,7 @@ def run_app(initial_file_path, directory_path):
                 prevent_initial_call=True
             )
             def export_kml(n_clicks, selected_property, max_cost, clicked_point_data, current_file_data):
+                print("Doing callback: export_klm")
                 if n_clicks is None or n_clicks == 0:
                     return no_update
 
@@ -4010,7 +4607,6 @@ def run_app(initial_file_path, directory_path):
 
     except Exception as e:
         print(f"Error setting up application: {str(e)}")
-
 
 
 # Run the application

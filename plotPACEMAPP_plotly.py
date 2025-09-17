@@ -923,6 +923,29 @@ def generate_wavelength_colors(wavelengths):
 # =============================================================================
 # PLOTTING AND VISUALIZATION FUNCTIONS
 # =============================================================================
+def create_placeholder_figure(message):
+    """
+    Create placeholder figure with a message
+    """
+    fig = go.Figure()
+    fig.add_annotation(
+        text=message,
+        xref="paper", yref="paper",
+        x=0.5, y=0.5,
+        xanchor='center', yanchor='middle',
+        showarrow=False,
+        font=dict(size=18, color="#7f8c8d")
+    )
+    fig.update_layout(
+            height=800,
+            showlegend=False,
+            xaxis={'visible': False},
+            yaxis={'visible': False},
+            plot_bgcolor='white'
+    )
+    return fig
+
+
 def create_initial_combined_figure():
     """
     Create initial combined figure with 'click to view' annotation
@@ -2934,6 +2957,37 @@ def run_app(initial_file_path, directory_path):
                                         'display': 'inline-block'
                                     }),
 
+                                    html.Div([
+                                        html.Label("Analysis Mode:", style={
+                                            'fontWeight': 'bold',
+                                            'marginBottom': '5px',
+                                            'display': 'block',
+                                            'fontSize': '16px',
+                                        }),
+                                        dcc.RadioItems(
+                                            id='individual-analysis-mode',
+                                            options=[
+                                                {'label': ' Single File (Measured vs Modeled)', 'value': 'single'},
+                                                {'label': ' Compare Files (File 1 vs File 2)', 'value': 'multiple'}
+                                            ],
+                                            value='single',
+                                            style={'margin': '10px 0'},
+                                            labelStyle={'display': 'block', 'margin': '5px 0'}
+                                        ),
+                                        # dcc.Dropdown(
+                                        #     id='individual-analysis-mode',
+                                        #     options=[
+                                        #         {'label': 'Single File', 'value': 'single'},
+                                        #         {'label': 'Multiple File', 'value': 'mulitple'}
+                                        #     ],
+                                        #     value='single',
+                                        #     style={
+                                        #         'marginBottom': '15px',
+                                        #         'fontSize': '12px'
+                                        #     }
+                                        # ),
+                                    ]),
+
                                     # File selector
                                     html.Div([
                                         html.Label("Select File:", style={
@@ -2945,13 +2999,36 @@ def run_app(initial_file_path, directory_path):
                                         dcc.Dropdown(
                                             id='file-selector',
                                             options=file_options,
-                                            value=initial_file_path,
+                                            # value=initial_file_path,
+                                            value=None,
+                                            placeholder="Please select a file...",
                                             style={
                                                 'marginBottom': '15px',
                                                 'fontSize': '12px'
                                             }
                                         ),
                                     ]),
+
+                                    # 2nd File selector
+                                    html.Div([
+                                        html.Label("Select Second File:", style={
+                                            'fontWeight': 'bold',
+                                            'marginBottom': '5px',
+                                            'display': 'block',
+                                            'fontSize': '16px'
+                                        }),
+                                        dcc.Dropdown(
+                                            id='individual-file-selector-2',
+                                            options=file_options,
+                                            # value=initial_file_path,
+                                            value=None,
+                                            placeholder="Please select a second file...",
+                                            style={
+                                                'marginBottom': '15px',
+                                                'fontSize': '12px'
+                                            }
+                                        ),
+                                    ], id='individual-file-2-container', style={'display': 'none'}),
 
                                     # Aerosol property selector
                                     html.Div([
@@ -2961,16 +3038,79 @@ def run_app(initial_file_path, directory_path):
                                             'display': 'block',
                                             'fontSize': '16px'
                                         }),
+                                        # dcc.Dropdown(
+                                        #     id='property-selector',
+                                        #     options=dropdown_options,
+                                        #     value=default_var,
+                                        #     style={
+                                        #         'marginBottom': '25px',
+                                        #         'height': '24px',
+                                        #         'fontSize': '16px'
+                                        #     }
+                                        # ),
                                         dcc.Dropdown(
                                             id='property-selector',
-                                            options=dropdown_options,
-                                            value=default_var,
+                                            options=[],  # empty initially
+                                            value=None,  # no selection initially
+                                            # disabled=True,  # disable until file loaded
+                                            # placeholder="Please select a file first...",
+                                            placeholder="",
                                             style={
                                                 'marginBottom': '25px',
                                                 'height': '24px',
                                                 'fontSize': '16px'
                                             }
                                         ),
+                                    ]),
+
+                                    # Cost selector
+                                    html.Div([
+                                        # html.Label(f"Cost Filter (Default={default_cost_value}/Range=[{min_cost_value:.3f}, {max_cost_value:.3f}]):",
+                                        html.Label("Cost Filter:",
+                                                   id='cost-filter-label',
+                                                   style={
+                                                      'fontWeight': 'bold',
+                                                      'marginBottom': '5px',
+                                                      'display': 'block',
+                                                      'fontSize': '16px'
+                                                    }),
+                                        html.Div([
+                                            # dcc.Input(
+                                            #     id='cost-input',
+                                            #     type='number',
+                                            #     min=0,
+                                            #     max=max_cost_value,
+                                            #     # value=max_cost_value,
+                                            #     value=default_cost_value,
+                                            #     step=0.1,
+                                            #     style={
+                                            #         'width': '65%',
+                                            #         'height': '24px',
+                                            #         'fontSize': '12px',
+                                            #         'marginRight': '5%'
+                                            #     }
+                                            # ),
+                                            dcc.Input(
+                                                id='cost-input',
+                                                type='number',
+                                                min=0,
+                                                max=1,  # temp default
+                                                value=None,
+                                                placeholder="Select file first.",
+                                                step=0.1,
+                                                style={
+                                                    'width': '65%',
+                                                    'height': '24px',
+                                                    'fontSize': '12px',
+                                                    'marginRight': '5%'
+                                                }
+                                            ),
+                                            html.Button('Apply', id='apply-cost-button', n_clicks=0,
+                                                        style={'width': '30%', 'padding': '8px', 'backgroundColor': '#27ae60',
+                                                               'color': 'white', 'border': 'none', 'borderRadius': '4px',
+                                                               'cursor': 'pointer'}),
+                                        ], style={'display': 'flex', 'marginBottom': '30px'}),
+                                        html.Div(id='cost-input-message', style={'fontSize': '12px', 'color': '#7f8c8d'}),
                                     ]),
 
                                     # Lat/Lon inputs
@@ -3012,40 +3152,6 @@ def run_app(initial_file_path, directory_path):
                                                     style={'width': '100%', 'padding': '8px', 'backgroundColor': '#3498db',
                                                            'color': 'white', 'border': 'none', 'borderRadius': '4px',
                                                            'cursor': 'pointer', 'marginBottom': '15px'}),
-                                    ]),
-
-                                    # Cost selector
-                                    html.Div([
-                                        # html.Label(f"Cost Filter (Min={min_cost_value:.3f}/Max={max_cost_value:.3f}):",
-                                        html.Label(f"Cost Filter (Default={default_cost_value}/Range=[{min_cost_value:.3f}, {max_cost_value:.3f}]):",
-                                                   style={
-                                                      'fontWeight': 'bold',
-                                                      'marginBottom': '5px',
-                                                      'display': 'block',
-                                                      'fontSize': '15px'
-                                                    }),
-                                        html.Div([
-                                            dcc.Input(
-                                                id='cost-input',
-                                                type='number',
-                                                min=0,
-                                                max=max_cost_value,
-                                                # value=max_cost_value,
-                                                value=default_cost_value,
-                                                step=0.1,
-                                                style={
-                                                    'width': '65%',
-                                                    'height': '24px',
-                                                    'fontSize': '12px',
-                                                    'marginRight': '5%'
-                                                }
-                                            ),
-                                            html.Button('Apply', id='apply-cost-button', n_clicks=0,
-                                                        style={'width': '30%', 'padding': '8px', 'backgroundColor': '#27ae60',
-                                                               'color': 'white', 'border': 'none', 'borderRadius': '4px',
-                                                               'cursor': 'pointer'}),
-                                        ], style={'display': 'flex', 'marginBottom': '30px'}),
-                                        html.Div(id='cost-input-message', style={'fontSize': '12px', 'color': '#7f8c8d'}),
                                     ]),
 
                                     # Export buttons
@@ -3097,7 +3203,8 @@ def run_app(initial_file_path, directory_path):
                             html.Div([
                                 dcc.Graph(
                                     id='aerosol-plot',
-                                    figure=create_scatter_plot_only(filtered_data, default_var, original_indices),
+                                    # figure=create_scatter_plot_only(filtered_data, default_var, original_indices),
+                                    figure=create_placeholder_figure("Please select a file to view the scatter plot"),
                                     style={'height': '800px', 'border': '1px solid #bdc3c7', 'borderRadius': '5px'}
                                 ),
                             ], style={
@@ -3111,7 +3218,8 @@ def run_app(initial_file_path, directory_path):
                                 html.Div([
                                     dcc.Graph(
                                         id='combined-plot',
-                                        figure=create_initial_combined_figure(),
+                                        # figure=create_initial_combined_figure(),
+                                        figure=create_placeholder_figure(""),
                                         style={'height': '800px', 'border': '1px solid #bdc3c7', 'borderRadius': '5px'}  # Full height
                                     ),
                                 ]),
@@ -3153,7 +3261,8 @@ def run_app(initial_file_path, directory_path):
                                             {'label': ' Compare Files (File 1 vs File 2)', 'value': 'compare'}
                                         ],
                                         value='single',
-                                        style={'margin': '10px 0'},
+                                        style={'margin': '10px 0',
+                                               'fontSize': '10px'},
                                         labelStyle={'display': 'block', 'margin': '5px 0'}
                                     ),
 
@@ -3370,7 +3479,8 @@ def run_app(initial_file_path, directory_path):
                                         dcc.Dropdown(
                                             id='residual-file-selector',
                                             options=file_options,
-                                            value=initial_file_path,
+                                            # value=initial_file_path,
+                                            value=None,
                                             style={
                                                 'marginBottom': '15px',
                                                 'fontSize': '12px'
@@ -3560,6 +3670,23 @@ def run_app(initial_file_path, directory_path):
             #   -Update aod-total-click-info with the same data
             #   as click-info
             # ---------------------------------------------------
+            @app.callback(
+                Output('individual-file-2-container', 'style'),
+                Input('individual-analysis-mode', 'value'),
+                prevent_initial_call=True
+            )
+            def toggle_individual_file_2_visibility(analysis_mode):
+                '''
+                Display 2nd file dropdown if Analysis Mode is multi file
+                '''
+                print("Doing callback: toggle_individual_file_2_visibility")
+                if analysis_mode == 'multiple':
+                    print(f"ANALYSIS MODE = {analysis_mode}")
+                    return {'display': 'block'}  # Show 2nd file selector
+                else:
+                    print(f"ANALYSIS MODE = {analysis_mode}")
+                    return {'display': 'none'}  # hide file selector
+
             @app.callback(
                 Output('aod-total-click-info', 'children'),
                 Input('click-info', 'children'),
@@ -4008,7 +4135,10 @@ def run_app(initial_file_path, directory_path):
                 prevent_initial_call=True
             )
             def toggle_polarized_controls_visibility(analysis_mode, available_files, file2_selected):
-                """Show/hide second file selector and difference type based on analysis mode and file selection"""
+                """
+                Show/hide second file selector and difference type based on
+                analysis mode and file selection
+                """
                 print("Doing callback: toggle_polarized_controls_visibility")
                 if analysis_mode == 'compare':
                     # Show the second file selector
@@ -4180,12 +4310,17 @@ def run_app(initial_file_path, directory_path):
                  Output('cost-input', 'max'),
                  Output('cost-input', 'value'),
                  Output('clicked-point-store', 'data'),
-                 Output('applied-cost-value', 'data')],
-                [Input('file-selector', 'value')],
+                 Output('applied-cost-value', 'data'),
+                 Output('cost-filter-label', 'children')],
+                [Input('file-selector', 'value'),
+                 Input('individual-analysis-mode', 'value'),
+                 Input('individual-file-selector-2', 'value')],
                 prevent_initial_call=True
             )
-            def update_file_selection(selected_file_path):
+            def update_file_selection(selected_file_path, analysis_mode, selected_file_path_2):
                 print("Doing callback: update_file_selections")
+                print(f"DEBUG: File selection - Mode: {analysis_mode}, File1: {selected_file_path}, File2: {selected_file_path_2}")
+
                 # Read new file
                 try:
                     new_data_dict, new_sorted_variables, new_display_names, new_variable_metadata = read_hdf5_variables(selected_file_path)
@@ -4233,10 +4368,12 @@ def run_app(initial_file_path, directory_path):
                         new_max_cost_value,
                         new_default_cost_value,
                         None,
-                        new_default_cost_value
+                        new_default_cost_value,
+                        f"Cost Filter (Default={default_cost_value}/Range=[{min_cost_value:.3f}, {max_cost_value:.3f}]):",
                     )
 
                 except Exception as e:
+                    import dash
                     print(f"Error loading file {selected_file_path}: {str(e)}")
                     # If error, return current values
                     raise dash.exceptions.PreventUpdate

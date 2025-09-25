@@ -15,14 +15,41 @@ import traceback
 import sys
 
 
+# Global Variables
 PLOT_WIDTH = 1550  # in pixels
 debug = 1
 default_cost = 0.5
+_data_cache = {}
 
 
 # =============================================================================
 # UTILITY FUNCTIONS
 # =============================================================================
+def get_cached_data(file_path):
+    """Get data from cache or load if not cached"""
+    if file_path not in _data_cache:
+        print(f"Loading and caching data for: {file_path}")
+        data_dict, sorted_vars, display_names, var_metadata = read_hdf5_variables(file_path)
+        _data_cache[file_path] = {
+            'data_dict': data_dict,
+            'sorted_variables': sorted_vars,
+            'display_names': display_names,
+            'variable_metadata': var_metadata
+        }
+    else:
+        print(f"Using cached data for: {file_path}")
+
+    return _data_cache[file_path]
+
+
+def clear_data_cache():
+    """
+    Clear cache if needed
+    """
+    global _data_cache
+    _data_cache.clear()
+
+
 def scan_directory_for_files(directory_path):
     """
     Scan specified directory for specified .h5 and .nc files.
@@ -923,6 +950,147 @@ def generate_wavelength_colors(wavelengths):
 # =============================================================================
 # PLOTTING AND VISUALIZATION FUNCTIONS
 # =============================================================================
+def create_intensity_plot_only(intensity_data, wavelengths, wl_colors, title):
+    """
+    Create intensity-only plot
+    """
+    fig = go.Figure()
+
+    for wl in wavelengths:
+        name = f'{wl} nm'
+
+        # Add measured intensity
+        fig.add_trace(go.Scatter(
+            x=intensity_data[wl]['x'],
+            y=intensity_data[wl]['y_meas'],
+            mode='markers+lines',
+            name=name,
+            line=dict(color=wl_colors[wl], width=2),
+            marker=dict(color=wl_colors[wl], size=6),
+            legendgroup=f'wl{wl}',
+            showlegend=True
+        ))
+
+        # Add modeled intensity
+        fig.add_trace(go.Scatter(
+            x=intensity_data[wl]['x'],
+            y=intensity_data[wl]['y_model'],
+            mode='lines',
+            name=name,
+            line=dict(color=wl_colors[wl], width=2, dash='dash'),
+            legendgroup=f'wl{wl}',
+            showlegend=False
+        ))
+
+    fig.update_layout(
+        title=dict(
+            # text=title,
+            text="Intensity",
+            y=0.99,
+            x=0.5,
+            xanchor='center'
+        ),
+        xaxis_title="Viewing Zenith Angle (degrees)",
+        yaxis_title="Intensity",
+        height=800,
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=1.15,  # Middle of the figure (between subplots)
+            xanchor="center",
+            x=0.5,
+            bgcolor="rgba(255,255,255,0.9)",  # Semi-transparent background
+            bordercolor="rgba(0,0,0,0.3)",
+            borderwidth=1,
+            # Force wider legend box
+            itemsizing="constant",
+            # itemwidth=30,
+            tracegroupgap=5,
+            valign="middle",
+            title=dict(
+                text="<b>Wavelengths </b>" + "(— Solid: Measured, - - Dashed: Modeled)</b>",
+                font=dict(size=14, family="Arial", color="black"),
+                side="top"
+            )
+        ),
+        margin=dict(t=120, b=50, l=60, r=50),
+        autosize=True
+    )
+
+    return fig
+
+
+def create_dolp_plot_only(dolp_data, wavelengths, wl_colors, title):
+    """
+    Create DoLP-only plot
+    """
+    fig = go.Figure()
+
+    for wl in wavelengths:
+        name = f'{wl} nm'
+
+        # Add measured DoLP
+        fig.add_trace(go.Scatter(
+            x=dolp_data[wl]['x'],
+            y=dolp_data[wl]['y_meas'],
+            mode='markers+lines',
+            name=name,
+            line=dict(color=wl_colors[wl], width=2),
+            marker=dict(color=wl_colors[wl], size=6),
+            legendgroup=f'wl{wl}',
+            showlegend=True
+        ))
+
+        # Add modeled DoLP
+        fig.add_trace(go.Scatter(
+            x=dolp_data[wl]['x'],
+            y=dolp_data[wl]['y_model'],
+            mode='lines',
+            name=name,
+            line=dict(color=wl_colors[wl], width=2, dash='dash'),
+            legendgroup=f'wl{wl}',
+            showlegend=False
+        ))
+
+    fig.update_layout(
+        title=dict(
+            # text=title,
+            text="DoLP",
+            y=0.99,
+            x=0.5,
+            xanchor='center'
+        ),
+        xaxis_title="Viewing Zenith Angle (degrees)",
+        yaxis_title="DoLP",
+        height=800,
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=1.15,  # Middle of the figure (between subplots)
+            xanchor="center",
+            x=0.5,
+            bgcolor="rgba(255,255,255,0.9)",  # Semi-transparent background
+            bordercolor="rgba(0,0,0,0.3)",
+            borderwidth=1,
+            # Force wider legend box
+            itemsizing="constant",
+            # itemwidth=30,
+            tracegroupgap=5,
+            valign="middle",
+            title=dict(
+                text="<b>Wavelengths </b>" + "(— Solid: Measured, - - Dashed: Modeled)</b>",
+                font=dict(size=14, family="Arial", color="black"),
+                side="top"
+            )
+        ),
+        # margin=dict(t=80, b=50, l=60, r=50),
+        margin=dict(t=120, b=50, l=60, r=50),
+        autosize=True
+    )
+
+    return fig
+
+
 def create_placeholder_figure(message):
     """
     Create placeholder figure with a message
@@ -1071,22 +1239,45 @@ def create_scatter_plot_only(data_dict, selected_property, original_indices, cli
         )
     )
 
-    # Highlight selected point
-    if clicked_point_data is not None and 'row' in clicked_point_data:
-        selected_row = clicked_point_data['row']
-        selected_col = clicked_point_data['col']
-        lat = data_dict['latitude'][selected_row, selected_col]
-        lon = data_dict['longitude'][selected_row, selected_col]
+    # Highlight selected point (updated to handle single/multi-file modes)
+    if clicked_point_data is not None:
+        if 'row' in clicked_point_data:
+            # Single file mode format
+            selected_row = clicked_point_data['row']
+            selected_col = clicked_point_data['col']
+            lat = data_dict['latitude'][selected_row, selected_col]
+            lon = data_dict['longitude'][selected_row, selected_col]
 
-        fig.add_trace(
-            go.Scattermap(
-                lon=[lon], lat=[lat],
-                mode='markers',
-                marker=dict(size=10, color='red', symbol='circle'),
-                showlegend=False,
-                hoverinfo='skip'
+            fig.add_trace(
+                go.Scattermap(
+                    lon=[lon], lat=[lat],
+                    mode='markers',
+                    marker=dict(size=10, color='red', symbol='circle'),
+                    showlegend=False,
+                    hoverinfo='skip'
+                )
             )
-        )
+        elif 'lat' in clicked_point_data and 'lon' in clicked_point_data:
+            # Multi file mode format
+            fig.add_trace(
+                go.Scattermap(
+                    lon=[clicked_point_data['lon']], lat=[clicked_point_data['lat']],
+                    mode='markers',
+                    marker=dict(
+                        size=12,
+                        color='red',
+                        symbol='circle',
+                    ),
+                    showlegend=False,
+                    text=[f"Selected: {clicked_point_data['value']:.3f}"],
+                    hovertemplate="<b>Selected Point</b><br>" +
+                                  f"<b>{selected_property}:</b> {clicked_point_data['value']:.3f}<br>" +
+                                  f"<b>Lat:</b> {clicked_point_data['lat']:.3f}<br>" +
+                                  f"<b>Lon:</b> {clicked_point_data['lon']:.3f}<br>" +
+                                  "<extra></extra>",
+                    name="Selected Point"
+                )
+            )
 
     center_lat = np.mean(lat_valid) if len(lat_valid) > 0 else 34
     center_lon = np.mean(lon_valid) if len(lon_valid) > 0 else -121
@@ -1099,7 +1290,8 @@ def create_scatter_plot_only(data_dict, selected_property, original_indices, cli
         map=dict(
             style="open-street-map",
             center=dict(lat=center_lat, lon=center_lon),
-            zoom=4.35
+            # zoom=4.35
+            zoom=4.0
         ),
         margin=dict(
             l=0,
@@ -2864,6 +3056,7 @@ def run_app(initial_file_path, directory_path):
 
     # Read the initial HDF5 file
     try:
+        print(f"Initial_file_path = {initial_file_path}")
         data_dict, sorted_variables, display_names, variable_metadata = \
                 read_hdf5_variables(initial_file_path)
 
@@ -2908,6 +3101,7 @@ def run_app(initial_file_path, directory_path):
                 }),
                 dcc.Store(id='clicked-point-store'),
                 dcc.Store(id='applied-cost-value', data=default_cost_value),
+                # dcc.Store(id='multi-file-clicked-point', data=None),
 
                 # Page header
                 html.H1("PACE-MAPP Aerosol Properties Interactive Visualization",
@@ -2919,7 +3113,7 @@ def run_app(initial_file_path, directory_path):
                         }),
 
                 # ---------------------------------------------------
-                # Tabs component
+                # Begin setting up Tabs
                 # ---------------------------------------------------
                 # dcc.Tabs(id="visualization-tabs", value='tab-about', children=[
                 dcc.Tabs(id="visualization-tabs", value='tab-individual', children=[
@@ -2944,8 +3138,9 @@ def run_app(initial_file_path, directory_path):
                     dcc.Tab(label='Individual', value='tab-individual', children=[
                         # Main three-column layout for Individual tab
                         html.Div([
-
                             # LEFT COLUMN - Controls and Properties
+                            # NOTE: this is the same for both individual and
+                            # multi-file modes.
                             html.Div([
                                 # Controls section
                                 html.Div([
@@ -2974,18 +3169,6 @@ def run_app(initial_file_path, directory_path):
                                             style={'margin': '10px 0'},
                                             labelStyle={'display': 'block', 'margin': '5px 0'}
                                         ),
-                                        # dcc.Dropdown(
-                                        #     id='individual-analysis-mode',
-                                        #     options=[
-                                        #         {'label': 'Single File', 'value': 'single'},
-                                        #         {'label': 'Multiple File', 'value': 'mulitple'}
-                                        #     ],
-                                        #     value='single',
-                                        #     style={
-                                        #         'marginBottom': '15px',
-                                        #         'fontSize': '12px'
-                                        #     }
-                                        # ),
                                     ]),
 
                                     # File selector
@@ -3038,16 +3221,6 @@ def run_app(initial_file_path, directory_path):
                                             'display': 'block',
                                             'fontSize': '16px'
                                         }),
-                                        # dcc.Dropdown(
-                                        #     id='property-selector',
-                                        #     options=dropdown_options,
-                                        #     value=default_var,
-                                        #     style={
-                                        #         'marginBottom': '25px',
-                                        #         'height': '24px',
-                                        #         'fontSize': '16px'
-                                        #     }
-                                        # ),
                                         dcc.Dropdown(
                                             id='property-selector',
                                             options=[],  # empty initially
@@ -3065,7 +3238,6 @@ def run_app(initial_file_path, directory_path):
 
                                     # Cost selector
                                     html.Div([
-                                        # html.Label(f"Cost Filter (Default={default_cost_value}/Range=[{min_cost_value:.3f}, {max_cost_value:.3f}]):",
                                         html.Label("Cost Filter:",
                                                    id='cost-filter-label',
                                                    style={
@@ -3075,21 +3247,6 @@ def run_app(initial_file_path, directory_path):
                                                       'fontSize': '16px'
                                                     }),
                                         html.Div([
-                                            # dcc.Input(
-                                            #     id='cost-input',
-                                            #     type='number',
-                                            #     min=0,
-                                            #     max=max_cost_value,
-                                            #     # value=max_cost_value,
-                                            #     value=default_cost_value,
-                                            #     step=0.1,
-                                            #     style={
-                                            #         'width': '65%',
-                                            #         'height': '24px',
-                                            #         'fontSize': '12px',
-                                            #         'marginRight': '5%'
-                                            #     }
-                                            # ),
                                             dcc.Input(
                                                 id='cost-input',
                                                 type='number',
@@ -3199,6 +3356,76 @@ def run_app(initial_file_path, directory_path):
                                 'marginRight': '1%'
                             }),
 
+                            # New plotting containers for multi-file mode (BEFORE MIDDLE COLUMN)
+                            html.Div([
+                                # Row 1: side by side scatter plots
+                                html.Div([
+                                    html.Div([
+                                        html.H4("File 1", id='file-1-scatter-header', style={'textAlign': 'center', 'margin': '0 0 10px 0'}),
+                                        dcc.Graph(
+                                            id='scatter-plot-1',
+                                            figure=create_placeholder_figure("Select files to compare"),
+                                            style={'height': '700px', 'border': '1px solid #bdc3c7', 'borderRadius': '5px'}
+                                        ),
+                                    ], style={'width': '47%', 'display': 'inline-block', 'marginRight': '6%'}),
+
+                                    html.Div([
+                                        html.H4("File 2", id='file-2-scatter-header', style={'textAlign': 'center', 'margin': '0 0 10px 0'}),
+                                        dcc.Graph(
+                                            id='scatter-plot-2',
+                                            figure=create_placeholder_figure("Select files to compare"),
+                                            style={'height': '700px', 'border': '1px solid #bdc3c7', 'borderRadius': '5px'}
+                                        ),
+                                    ], style={'width': '47%', 'display': 'inline-block'}),
+                                ], style={'marginBottom': '50px'}),
+
+                                # Row 2: Side-by-side Intensity Plots
+                                html.Div([
+                                    html.Div([
+                                        html.H4("Intensity - File 1", id='file-1-intensity-header', style={'textAlign': 'center', 'margin': '0 0 10px 0'}),
+                                        dcc.Graph(
+                                            id='intensity-plot-1',
+                                            figure=create_initial_combined_figure(),
+                                            style={'height': '800px', 'border': '1px solid #bdc3c7', 'borderRadius': '5px'}
+                                        ),
+                                    ], style={'width': '49%', 'display': 'inline-block', 'marginRight': '1%'}),
+
+                                    html.Div([
+                                        html.H4("Intensity - File 2", id='file-2-intensity-header', style={'textAlign': 'center', 'margin': '0 0 10px 0'}),
+                                        dcc.Graph(
+                                            id='intensity-plot-2',
+                                            figure=create_initial_combined_figure(),
+                                            style={'height': '800px', 'border': '1px solid #bdc3c7', 'borderRadius': '5px'}
+                                        ),
+                                    ], style={'width': '49%', 'display': 'inline-block'}),
+                                ], style={'marginBottom': '20px'}),
+
+                                # Row 3: Side-by-side DoLP Plots
+                                html.Div([
+                                    html.Div([
+                                        html.H4("DoLP - File 1", id='file-1-dolp-header', style={'textAlign': 'center', 'margin': '0 0 10px 0'}),
+                                        dcc.Graph(
+                                            id='dolp-plot-1',
+                                            figure=create_initial_combined_figure(),
+                                            style={'height': '800px', 'border': '1px solid #bdc3c7', 'borderRadius': '5px'}
+                                        ),
+                                    ], style={'width': '49%', 'display': 'inline-block', 'marginRight': '1%'}),
+
+                                    html.Div([
+                                        html.H4("DoLP - File 2", id='file-2-dolp-header', style={'textAlign': 'center', 'margin': '0 0 10px 0'}),
+                                        dcc.Graph(
+                                            id='dolp-plot-2',
+                                            figure=create_initial_combined_figure(),
+                                            style={'height': '800px', 'border': '1px solid #bdc3c7', 'borderRadius': '5px'}
+                                        ),
+                                    ], style={'width': '49%', 'display': 'inline-block'}),
+                                ]),
+                            ], id='multi-file-plots-container', style={
+                                    'display': 'none',
+                                    'padding': '20px',
+                                    'paddingTop': '40px'  # add more space above
+                                    }),
+
                             # MIDDLE COLUMN - Scatter Plot
                             html.Div([
                                 dcc.Graph(
@@ -3207,7 +3434,7 @@ def run_app(initial_file_path, directory_path):
                                     figure=create_placeholder_figure("Please select a file to view the scatter plot"),
                                     style={'height': '800px', 'border': '1px solid #bdc3c7', 'borderRadius': '5px'}
                                 ),
-                            ], style={
+                            ], id='single-file-middle-column', style={
                                 'flex': '0 0 31%',  # Back to original size
                                 'marginRight': '1%'
                             }),
@@ -3224,15 +3451,18 @@ def run_app(initial_file_path, directory_path):
                                     ),
                                 ]),
 
-                            ], style={
+                            ], id='single-file-right-column', style={
                                 'flex': '0 0 42%'
                             }),
+
+
                         ], style={
                             'display': 'flex',
                             'flexDirection': 'row',
                             'padding': '0 20px',
                             'gap': '0px'  # No gap since we're using margins
                         }),
+
                     ]),
 
                     # ---------------------------------------------------
@@ -3262,7 +3492,7 @@ def run_app(initial_file_path, directory_path):
                                         ],
                                         value='single',
                                         style={'margin': '10px 0',
-                                               'fontSize': '10px'},
+                                               'fontSize': '14px'},
                                         labelStyle={'display': 'block', 'margin': '5px 0'}
                                     ),
 
@@ -3670,6 +3900,296 @@ def run_app(initial_file_path, directory_path):
             #   -Update aod-total-click-info with the same data
             #   as click-info
             # ---------------------------------------------------
+            # Multi-file mode - Update all plots when both files selected
+            @app.callback(
+                [Output('scatter-plot-1', 'figure'),
+                 Output('scatter-plot-2', 'figure'),
+                 Output('intensity-plot-1', 'figure'),
+                 Output('intensity-plot-2', 'figure'),
+                 Output('dolp-plot-1', 'figure'),
+                 Output('dolp-plot-2', 'figure'),
+                 Output('file-1-scatter-header', 'children'),
+                 Output('file-2-scatter-header', 'children'),
+                 Output('file-1-intensity-header', 'children'),
+                 Output('file-2-intensity-header', 'children'),
+                 Output('file-1-dolp-header', 'children'),
+                 Output('file-2-dolp-header', 'children')],
+                [Input('individual-analysis-mode', 'value'),
+                 Input('file-selector', 'value'),
+                 Input('individual-file-selector-2', 'value'),
+                 Input('property-selector', 'value'),
+                 Input('applied-cost-value', 'data'),
+                 # Input('multi-file-clicked-point', 'data')],
+                 Input('scatter-plot-1', 'clickData')],
+                prevent_initial_call=True
+            )
+            def update_multi_file_plots(analysis_mode, file_path_1, file_path_2, selected_property, max_cost, clickData):
+                from dash import callback_context
+                print("Doing callback: update_multi_file_plots")
+
+                # Check chat triggered this callback
+                ctx = callback_context
+                files_changed = False
+
+                if ctx.triggered:
+                    trigger_id = ctx.triggered[0]['prop_id']
+                    if ('file-selector.value' in trigger_id or
+                        'individual-file-selector-2.value' in trigger_id or
+                        'individual-analysis-mode.value' in trigger_id):
+                        files_changed = True
+                        print("DEBUG: Files or mode changed, ignoring old click data")
+
+                # use click data only if files have NOT changed
+                # and use effective_clickData instead of clickData below
+                effective_clickData = None if files_changed else clickData
+
+                # default_headers = ["File 1", "File 2", "Intensity - File 1",
+                #                    "Intensity - File 2", "DoLP - File 1", "DoLP - File 2"]
+                default_headers = ["", "", "",
+                                   "", "", ""]
+                # Only run in multi-file mode
+                if analysis_mode != 'multiple':
+                    # Return placeholder figures for all 6 plots
+                    placeholder_fig = create_placeholder_figure("Switch to Multiple File mode")
+                    default_headers = default_headers
+                    # default_headers = ["File 1", "File 2", "Intensity - File 1",
+                    #                    "Intensity - File 2", "DoLP - File 1", "DoLP - File 2"]
+                    return [placeholder_fig] * 6 + default_headers
+
+                # Check if both files are selected
+                if file_path_1 is None or file_path_2 is None:
+                    placeholder_msg = "Please select both files to compare"
+                    placeholder_fig = create_placeholder_figure(placeholder_msg)
+                    default_headers = default_headers
+                    # default_headers = ["File 1", "File 2", "Intensity - File 1",
+                    #                    "Intensity - File 2", "DoLP - File 1", "DoLP - File 2"]
+                    return [placeholder_fig] * 6 + default_headers
+
+                # Check if property is selected
+                if selected_property is None:
+                    placeholder_fig = create_placeholder_figure("Please select a property to display")
+                    default_headers = default_headers
+                    # default_headers = ["File 1", "File 2", "Intensity - File 1",
+                    #                    "Intensity - File 2", "DoLP - File 1", "DoLP - File 2"]
+                    return [placeholder_fig] * 6 + default_headers
+
+                try:
+                    # Load data for both files using cache
+                    print("DEBUG: Loading cached data for file 1...")
+                    cached_data_1 = get_cached_data(file_path_1)
+
+                    print("DEBUG: Loading cached data for file 2...")
+                    cached_data_2 = get_cached_data(file_path_2)
+                    print(f"DEBUG: Cache keys after loading: {list(_data_cache.keys())}")
+
+                    data_dict_1 = cached_data_1['data_dict']
+                    data_dict_2 = cached_data_2['data_dict']
+
+                    # Filter data by cost for both files
+                    filtered_data_1, original_indices_1 = filter_by_cost(data_dict_1, max_cost)
+                    filtered_data_2, original_indices_2 = filter_by_cost(data_dict_2, max_cost)
+
+                    # Create scatter plots with clicked point markers
+                    clicked_data_1 = None
+                    clicked_data_2 = None
+
+                    if effective_clickData is not None and 'points' in effective_clickData and len(effective_clickData['points']) > 0:
+                        clicked_point = effective_clickData['points'][0]
+                        click_lat = clicked_point['lat']
+                        click_lon = clicked_point['lon']
+
+                        # For File 1 - use clicked coordinates
+                        clicked_data_1 = {
+                            'lat': click_lat,
+                            'lon': click_lon,
+                            'value': clicked_point.get('marker.color', 0)
+                        }
+
+                        # For File 2 - find nearest point
+                        clicked_data_2 = None
+                        if file_path_2 is not None and analysis_mode == 'multiple':
+                            try:
+                                cached_data_2 = get_cached_data(file_path_2)
+                                data_dict_2 = cached_data_2['data_dict']
+
+                                filtered_data_2_temp, _ = filter_by_cost(data_dict_2, max_cost)
+                                lat_2d = filtered_data_2_temp['latitude']
+                                lon_2d = filtered_data_2_temp['longitude']
+                                prop_2d = filtered_data_2_temp[selected_property] if selected_property in filtered_data_2_temp else None
+
+                                valid_mask = np.isfinite(lat_2d) & np.isfinite(lon_2d)
+                                if prop_2d is not None:
+                                    valid_mask = valid_mask & np.isfinite(prop_2d)
+
+                                if np.any(valid_mask):
+                                    # Get flattened valid coords
+                                    valid_lats = lat_2d[valid_mask].flatten()
+                                    valid_lons = lon_2d[valid_mask].flatten()
+
+                                    # Find nearest point among valid (cost-filtered) points
+                                    file2_closest_idx = find_nearest_point(
+                                            valid_lats,
+                                            valid_lons,
+                                            click_lat, click_lon
+                                        )
+
+                                    # Get the actual coords of nearest valid point
+                                    file2_actual_lat = valid_lats[file2_closest_idx]
+                                    file2_actual_lon = valid_lons[file2_closest_idx]
+
+                                    # Get property value at that point
+                                    if prop_2d is not None:
+                                        valid_props = prop_2d[valid_mask].flatten()
+                                        file2_value = valid_props[file2_closest_idx]
+                                    else:
+                                        file2_value = 0
+
+                                    clicked_data_2 = {
+                                        'lat': float(file2_actual_lat),
+                                        'lon': float(file2_actual_lon),
+                                        'value': float(file2_value)
+                                    }
+
+                                    # Calculate distanc for debugging and maybe message to user
+                                    distance_deg = np.sqrt((click_lat - file2_actual_lat)**2 + (click_lon - file2_actual_lon)**2)
+                                    print(f"DEBUG: File 1 clicked at ({click_lat:.3f}, {click_lon:.3f})")
+                                    print(f"DEBUG: File 2 nearest FILTERED point at ({file2_actual_lat:.3f}, {file2_actual_lon:.3f})")
+                                    print(f"DEBUG: Distance: {distance_deg:.3f} degrees (~{distance_deg*111:.1f} km)")
+
+                                else:
+                                    print("DEBUG: No valid points found in File 2 after cost filtering")
+                                    clicked_data_2 = None
+                            except Exception as e:
+                                print(f"Error finding File 2 point: {e}")
+
+                    print(f"clicked_data_1 = {clicked_data_1}")
+                    print(f"clicked_data_2 = {clicked_data_2}")
+                    print("DEBUG: Creating scatter plots...")
+                    scatter_fig_1 = create_scatter_plot_only(filtered_data_1, selected_property, original_indices_1, clicked_data_1, max_cost)
+                    scatter_fig_2 = create_scatter_plot_only(filtered_data_2, selected_property, original_indices_2, clicked_data_2, max_cost)
+                    print("DEBUG: Scatter plots created sucessfully...")
+
+                    # Create intensity/DoLP plots
+                    if effective_clickData is not None and 'points' in effective_clickData and len(effective_clickData['points']) > 0:
+                        try:
+                            clicked_point = effective_clickData['points'][0]
+                            click_lat = clicked_point['lat']
+                            click_lon = clicked_point['lon']
+
+                            # File 1: Find the exact clicked point coordinates in the data
+                            # We need to convert lat/lon back to row/col for File 1
+                            file1_closest_idx = find_nearest_point(
+                                data_dict_1['latitude'].flatten(),
+                                data_dict_1['longitude'].flatten(),
+                                click_lat, click_lon
+                            )
+                            original_shape_1 = data_dict_1['original_shape']
+                            file1_row = file1_closest_idx // original_shape_1[1]
+                            file1_col = file1_closest_idx % original_shape_1[1]
+
+                            # File 2: We already found this in the red circle logic above
+                            file2_closest_idx = find_nearest_point(
+                                data_dict_2['latitude'].flatten(),
+                                data_dict_2['longitude'].flatten(),
+                                click_lat, click_lon
+                            )
+                            original_shape_2 = data_dict_2['original_shape']
+                            file2_row = file2_closest_idx // original_shape_2[1]
+                            file2_col = file2_closest_idx % original_shape_2[1]
+
+                            print(f"DEBUG: Creating plots for File1[{file1_row},{file1_col}] and File2[{file2_row},{file2_col}]")
+
+                            # Generate intensity and DoLP data for both files
+                            intensity_data_1, dolp_data_1, wavelengths_1 = get_channel_intensity_dolp_vza(data_dict_1, file1_row, file1_col)
+                            intensity_data_2, dolp_data_2, wavelengths_2 = get_channel_intensity_dolp_vza(data_dict_2, file2_row, file2_col)
+
+                            # Generate wavelength colors
+                            wl_colors_1 = generate_wavelength_colors(wavelengths_1)
+                            wl_colors_2 = generate_wavelength_colors(wavelengths_2)
+
+                            # Create individual intensity plots (not combined like single-file mode)
+                            intensity_fig_1 = create_intensity_plot_only(intensity_data_1, wavelengths_1, wl_colors_1, "File 1 Intensity")
+                            intensity_fig_2 = create_intensity_plot_only(intensity_data_2, wavelengths_2, wl_colors_2, "File 2 Intensity")
+
+                            # Create individual DoLP plots
+                            dolp_fig_1 = create_dolp_plot_only(dolp_data_1, wavelengths_1, wl_colors_1, "File 1 DoLP")
+                            dolp_fig_2 = create_dolp_plot_only(dolp_data_2, wavelengths_2, wl_colors_2, "File 2 DoLP")
+
+                        except Exception as e:
+                            print(f"ERROR creating intensity/DoLP plots: {e}")
+                            # Fall back to error message plots
+                            error_fig = create_initial_combined_figure()
+                            error_fig.layout.annotations[0].text = f"Error loading plot data: {str(e)}"
+                            intensity_fig_1 = intensity_fig_2 = dolp_fig_1 = dolp_fig_2 = error_fig
+
+                    else:
+                        # No click data - show "click to select" messages
+                        intensity_fig_1 = create_initial_combined_figure()
+                        intensity_fig_1.layout.annotations[0].text = "Click a point on File 1 map to view Intensity plot"
+
+                        intensity_fig_2 = create_initial_combined_figure()
+                        intensity_fig_2.layout.annotations[0].text = "Click a point on File 2 map to view Intensity plot"
+
+                        dolp_fig_1 = create_initial_combined_figure()
+                        dolp_fig_1.layout.annotations[0].text = "Click a point on File 1 map to view DoLP plot"
+
+                        dolp_fig_2 = create_initial_combined_figure()
+                        dolp_fig_2.layout.annotations[0].text = "Click a point on File 2 map to view DoLP plot"
+
+                    # Create plot header text from filenames
+                    if file_path_1 and file_path_2:
+                        filename_1 = os.path.basename(file_path_1)
+                        filename_2 = os.path.basename(file_path_2)
+
+                        headers = [
+                            filename_1,  # scatter 1 header
+                            filename_2,  # scatter 2 header
+                            filename_1,
+                            filename_2,
+                            filename_1,
+                            filename_2,
+                        ]
+                    else:
+                        headers = ["File 1", "File 2", "Intensity - File 1",
+                                   "Intensity - File 2", "DoLP - File 1", "DoLP - File 2"]
+
+                    # return (scatter_fig_1, scatter_fig_2, intensity_fig_1, intensity_fig_2, dolp_fig_1, dolp_fig_2)
+                    return (scatter_fig_1, scatter_fig_2, intensity_fig_1,
+                            intensity_fig_2, dolp_fig_1, dolp_fig_2, *headers)
+
+                except Exception as e:
+                    print(f"Error in multi-file callback: {e}")
+                    error_fig = create_placeholder_figure(f"Error loading data: {str(e)}")
+                    return [error_fig] * 6
+
+            @app.callback(
+                [Output('single-file-middle-column', 'style'),
+                 Output('single-file-right-column', 'style'),
+                 Output('multi-file-plots-container', 'style')],
+                Input('individual-analysis-mode', 'value'),
+                prevent_initial_call=True
+            )
+            def toggle_individual_layout(analysis_mode):
+                # print(f"DEBUG: Switching layout to {analysis_mode} mode")
+                print("Doing callback: toggle_individual_layout")
+
+                if analysis_mode == 'single':
+                    # Show single-file layout, hide multi-file layout
+                    return (
+                        {'flex': '0 0 31%', 'marginRight': '1%'},  # Show middle column
+                        {'flex': '0 0 42%'},  # Show right column
+                        # {'display': 'none', 'padding': '20px'}  # Hide multi-file container
+                        {'display': 'none', 'flex': '0 0 73%'}  # Hide multi-file container
+                    )
+                else:  # analysis_mode == 'multiple'
+                    # Hide single-file layout, show multi-file layout
+                    return (
+                        {'display': 'none'},  # Hide middle column
+                        {'display': 'none'},  # Hide right column
+                        # {'display': 'block', 'padding': '20px'}  # Show multi-file container
+                        {'display': 'block', 'flex': '0 0 73%'}  # Hide multi-file container
+                    )
+
             @app.callback(
                 Output('individual-file-2-container', 'style'),
                 Input('individual-analysis-mode', 'value'),
@@ -3677,6 +4197,7 @@ def run_app(initial_file_path, directory_path):
             )
             def toggle_individual_file_2_visibility(analysis_mode):
                 '''
+                NOTE: This callback can be combined with the above "toggle_individual_lauyout"
                 Display 2nd file dropdown if Analysis Mode is multi file
                 '''
                 print("Doing callback: toggle_individual_file_2_visibility")
@@ -4317,13 +4838,19 @@ def run_app(initial_file_path, directory_path):
                  Input('individual-file-selector-2', 'value')],
                 prevent_initial_call=True
             )
-            def update_file_selection(selected_file_path, analysis_mode, selected_file_path_2):
-                print("Doing callback: update_file_selections")
-                print(f"DEBUG: File selection - Mode: {analysis_mode}, File1: {selected_file_path}, File2: {selected_file_path_2}")
+            def load_and_process_data(selected_file_path, analysis_mode, selected_file_path_2):
+                print("Doing callback: load_and_process_data")
 
                 # Read new file
                 try:
-                    new_data_dict, new_sorted_variables, new_display_names, new_variable_metadata = read_hdf5_variables(selected_file_path)
+                    print(f"selected_file_path = {selected_file_path}")
+                    if selected_file_path is None:
+                        new_data_dict = []
+                        new_sorted_variables = []
+                        new_display_names = []
+                        new_variable_metadata = []
+                    else:
+                        new_data_dict, new_sorted_variables, new_display_names, new_variable_metadata = read_hdf5_variables(selected_file_path)
 
                     # Get new max cost value
                     new_max_cost_value = np.nanmax(new_data_dict['cost_function'])
@@ -4524,9 +5051,11 @@ def run_app(initial_file_path, directory_path):
                     empty_fig = go.Figure()
                     return (empty_fig, empty_fig, empty_fig, "No file path found", None, "No file path found", "")
 
-                # Read data from current file path
-                data_dict, sorted_variables, display_names, variable_metadata = \
-                    read_hdf5_variables(file_path)
+                # Read data from cache NOT from current file path
+                cached_data = get_cached_data(file_path)
+                data_dict = cached_data['data_dict']
+                # data_dict, sorted_variables, display_names, variable_metadata = \
+                #     read_hdf5_variables(file_path)
 
                 original_shape = data_dict['original_shape']
 

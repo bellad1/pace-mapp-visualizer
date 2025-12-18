@@ -9,10 +9,8 @@ import colorsys
 import argparse
 import glob
 import os
-import io
 import base64
 import traceback
-import sys
 
 
 # Global Variables
@@ -27,10 +25,18 @@ _data_cache = {}
 # UTILITY FUNCTIONS
 # =============================================================================
 def get_cached_data(file_path):
-    """Get data from cache or load if not cached"""
+    """
+    Get data from cache or load if not cached
+    """
     if file_path not in _data_cache:
         print(f"Loading and caching data for: {file_path}")
-        data_dict, sorted_vars, display_names, var_metadata = read_hdf5_variables(file_path)
+
+        # Use wrapper function that detects format and routes to correct reader
+        file_format = detect_file_format(file_path)
+        print(f"Detected file format: {file_format}")
+
+        data_dict, sorted_vars, display_names, var_metadata = load_retrieval_file(file_path)
+
         _data_cache[file_path] = {
             'data_dict': data_dict,
             'sorted_variables': sorted_vars,
@@ -183,40 +189,149 @@ def extract_timestamp_from_filename(filepath):
     return "Cannot parse time/date from file name"
 
 
+def detect_file_format(file_path):
+    """
+    Detect whether the file is RSP or HARP2 format based on filename.
+
+    Args:
+        file_path: (str) path to the retrieval file
+
+    Returns:
+        str: 'RSP' or 'HARP2'
+    """
+    filename = os.path.basename(file_path).lower()
+
+    if 'rsp' in filename:
+        return 'RSP'
+    else:
+        return 'HARP2'
+
+
+def get_reference_wavelength(filtered_data):
+    """
+    Find the best reference wavelength for displaying aerosol properties.
+    Prefers wavelengths close to 550-556 nm range (green channel).
+
+    Args:
+        filtered_data: Dictionary containing data arrays
+
+    Returns:
+        str: Reference wavelength (e.g., '556', '555', or closest available)
+    """
+    # Preferred wavelengths in order of preference (green channel region)
+    preferred_wavelengths = ['556', '555', '550', '553', '560']
+
+    # Check if any preferred wavelength exists in the data
+    for wl in preferred_wavelengths:
+        # Check if any property with this wavelength exists
+        test_key = f'optical_depth_fine_{wl}'
+        if test_key in filtered_data:
+            return wl
+
+    # If no preferred wavelength found, search for any wavelength in the data
+    # by checking optical_depth properties
+    wavelengths_found = set()
+    for key in filtered_data.keys():
+        if 'optical_depth_' in key and '_' in key:
+            parts = key.split('_')
+            if len(parts) >= 3 and parts[-1].isdigit():
+                wavelengths_found.add(parts[-1])
+
+    if wavelengths_found:
+        # Convert to integers, sort, and pick the middle one (or closest to 550)
+        wl_ints = sorted([int(w) for w in wavelengths_found])
+        # Find closest to 550 nm
+        closest_wl = min(wl_ints, key=lambda x: abs(x - 550))
+        return str(closest_wl)
+
+    # Fallback: return '556' (may not exist, but at least won't crash)
+    return '556'
+
+
+def get_available_modes(filtered_data):
+    """
+    Detect which aerosol modes are available in the dataset.
+
+    Args:
+        filtered_data: Dictionary containing data arrays
+
+    Returns:
+        list: List of available mode names (e.g., ['fine', 'dust'])
+    """
+    # Check if available_modes is already stored in data_dict
+    if 'available_modes' in filtered_data:
+        return filtered_data['available_modes']
+
+    # Otherwise, detect modes by checking for optical_depth variables
+    all_modes = ['fine', 'coarse', 'dust', 'sea_salt']
+    available_modes = []
+
+    for mode in all_modes:
+        # Check multiple properties to confirm mode exists
+        test_keys = [
+            f'optical_depth_{mode}',  # No wavelength suffix
+            f'reff_{mode}',
+            f'veff_{mode}',
+        ]
+        # Also check with common wavelengths
+        for wl in ['556', '555', '550']:
+            test_keys.append(f'optical_depth_{mode}_{wl}')
+
+        # If any test key exists, this mode is available
+        if any(key in filtered_data for key in test_keys):
+            available_modes.append(mode)
+
+    return available_modes if available_modes else ['fine', 'coarse', 'dust']  # fallback
+
+
+def get_mode_colors():
+    """
+    Return standard colors for aerosol modes.
+
+    Returns:
+        dict: Mapping of mode names to hex colors
+    """
+    return {
+        'fine': '#3498db',      # Blue
+        'coarse': '#e74c3c',    # Red
+        'dust': '#f39c12',      # Orange
+        'sea_salt': '#2ecc71'   # Green
+    }
+
+
 def create_properties_table(filtered_data, selected_row, selected_col, selected_property):
     """
     Create a table showing aerosol properties (by mode)
-    NOTE: we only print values at 556 nm for now
+    Dynamically detects reference wavelength and available modes.
     """
+    # Get reference wavelength and available modes dynamically
+    ref_wl = get_reference_wavelength(filtered_data)
+    modes = get_available_modes(filtered_data)
+    mode_colors = get_mode_colors()
+
     # Define the properties and their display names
     properties_config = [
-        ('optical_depth', 'Optical Depth', '556'),
-        ('ssa', 'Single Scattering Albedo', '556'),
-        ('real', 'Real Refractive Index', '556'),
-        ('imag', 'Imaginary Refractive Index', '556'),
-        ('asymmetry', 'Asymmetry Parameter', '556'),
-        # ('absorption_coefficient', 'Absorption Coefficient', '556'),
-        ('cross_section', 'Cross Section', '556'),
-        # ('extinction_coefficient', 'Extinction Coefficient', '556'),
-        ('number_concentration', 'Number Concentration', '556'),
-        # ('scattering_coefficient', 'Scattering Coefficient', '556'),
+        ('optical_depth', 'Optical Depth', ref_wl),
+        ('ssa', 'Single Scattering Albedo', ref_wl),
+        ('real', 'Real Refractive Index', ref_wl),
+        ('imag', 'Imaginary Refractive Index', ref_wl),
+        ('asymmetry', 'Asymmetry Parameter', ref_wl),
+        # ('absorption_coefficient', 'Absorption Coefficient', ref_wl),
+        ('cross_section', 'Cross Section', ref_wl),
+        # ('extinction_coefficient', 'Extinction Coefficient', ref_wl),
+        ('number_concentration', 'Number Concentration', ref_wl),
+        # ('scattering_coefficient', 'Scattering Coefficient', ref_wl),
         ('reff', 'Effective Radius', ''),
         ('veff', 'Effective Variance', ''),
     ]
     selected_prop = selected_property
-    modes = ['fine', 'coarse', 'dust']
-    mode_colors = {
-        'fine': '#3498db',
-        'coarse': '#e74c3c',
-        'dust': '#f39c12'
-    }
 
     # Create table header with updated property column title
     header = html.Tr([
-        html.Th("Property (* 556 nm)", style={'textAlign': 'left', 'padding': '8px', 'borderBottom': '2px solid #34495e'}),
+        html.Th(f"Property (* {ref_wl} nm)", style={'textAlign': 'left', 'padding': '8px', 'borderBottom': '2px solid #34495e'}),
         *[html.Th(mode.title(),
                   style={'textAlign': 'center', 'padding': '8px', 'borderBottom': '2px solid #34495e',
-                         'color': mode_colors[mode], 'fontWeight': 'bold'})
+                         'color': mode_colors.get(mode, '#95a5a6'), 'fontWeight': 'bold'})
           for mode in modes]
     ])
 
@@ -235,7 +350,17 @@ def create_properties_table(filtered_data, selected_row, selected_col, selected_
 
             if prop_key in filtered_data:
                 try:
-                    value = filtered_data[prop_key][selected_row, selected_col]
+                    # Handle both 1D (RSP) and 2D (HARP2) indexing
+                    prop_data = filtered_data[prop_key]
+                    if prop_data.ndim == 1:
+                        # 1D data (RSP): use selected_row as index
+                        value = prop_data[selected_row]
+                    elif prop_data.ndim == 2:
+                        # 2D data (HARP2): use [row, col] indexing
+                        value = prop_data[selected_row, selected_col]
+                    else:
+                        value = np.nan
+
                     if np.isfinite(value):
                         mode_values[mode] = f"{value:.3f}"
                     else:
@@ -247,8 +372,8 @@ def create_properties_table(filtered_data, selected_row, selected_col, selected_
 
         # Create row if at least one mode has data
         if any(val not in ["-", "N/A"] for val in mode_values.values()):
-            # Use * for 556nm properties, show wavelength for others
-            if wavelength == '556':
+            # Use * for reference wavelength properties, show wavelength for others
+            if wavelength == ref_wl:
                 property_label = f"{prop_display}*"
             elif wavelength:
                 property_label = f"{prop_display} ({wavelength}nm)"
@@ -261,7 +386,7 @@ def create_properties_table(filtered_data, selected_row, selected_col, selected_
                 *[html.Td(mode_values.get(mode, "-"),
                           style={'textAlign': 'center', 'padding': '8px',
                                  'borderBottom': '1px solid #ecf0f1',
-                                 'color': mode_colors[mode] if mode_values.get(mode, "-") not in ["-", "N/A"] else '#95a5a6'})
+                                 'color': mode_colors.get(mode, '#95a5a6') if mode_values.get(mode, "-") not in ["-", "N/A"] else '#95a5a6'})
                   for mode in modes]
             ])
             table_rows.append(row)
@@ -272,37 +397,35 @@ def create_properties_table(filtered_data, selected_row, selected_col, selected_
 def create_properties_table_safe(filtered_data, selected_row, selected_col):
     """
     Create a table showing aerosol properties (by mode)
-    NOTE: we only print values at 556 nm for now
+    Dynamically detects reference wavelength and available modes.
     """
+    # Get reference wavelength and available modes dynamically
+    ref_wl = get_reference_wavelength(filtered_data)
+    modes = get_available_modes(filtered_data)
+    mode_colors = get_mode_colors()
+
     # Define the properties and their display names
     properties_config = [
-        ('optical_depth', 'Optical Depth', '556'),
-        ('ssa', 'Single Scattering Albedo', '556'),
-        ('real', 'Real Refractive Index', '556'),
-        ('imag', 'Imaginary Refractive Index', '556'),
-        ('asymmetry', 'Asymmetry Parameter', '556'),
-        # ('absorption_coefficient', 'Absorption Coefficient', '556'),
-        ('cross_section', 'Cross Section', '556'),
-        # ('extinction_coefficient', 'Extinction Coefficient', '556'),
-        ('number_concentration', 'Number Concentration', '556'),
-        # ('scattering_coefficient', 'Scattering Coefficient', '556'),
+        ('optical_depth', 'Optical Depth', ref_wl),
+        ('ssa', 'Single Scattering Albedo', ref_wl),
+        ('real', 'Real Refractive Index', ref_wl),
+        ('imag', 'Imaginary Refractive Index', ref_wl),
+        ('asymmetry', 'Asymmetry Parameter', ref_wl),
+        # ('absorption_coefficient', 'Absorption Coefficient', ref_wl),
+        ('cross_section', 'Cross Section', ref_wl),
+        # ('extinction_coefficient', 'Extinction Coefficient', ref_wl),
+        ('number_concentration', 'Number Concentration', ref_wl),
+        # ('scattering_coefficient', 'Scattering Coefficient', ref_wl),
         ('reff', 'Effective Radius', ''),
         ('veff', 'Effective Variance', ''),
     ]
 
-    modes = ['fine', 'coarse', 'dust']
-    mode_colors = {
-        'fine': '#3498db',
-        'coarse': '#e74c3c',
-        'dust': '#f39c12'
-    }
-
     # Create table header with updated property column title
     header = html.Tr([
-        html.Th("Property (* 556 nm)", style={'textAlign': 'left', 'padding': '8px', 'borderBottom': '2px solid #34495e'}),
+        html.Th(f"Property (* {ref_wl} nm)", style={'textAlign': 'left', 'padding': '8px', 'borderBottom': '2px solid #34495e'}),
         *[html.Th(mode.title(),
                   style={'textAlign': 'center', 'padding': '8px', 'borderBottom': '2px solid #34495e',
-                         'color': mode_colors[mode], 'fontWeight': 'bold'})
+                         'color': mode_colors.get(mode, '#95a5a6'), 'fontWeight': 'bold'})
           for mode in modes]
     ])
 
@@ -321,7 +444,17 @@ def create_properties_table_safe(filtered_data, selected_row, selected_col):
 
             if prop_key in filtered_data:
                 try:
-                    value = filtered_data[prop_key][selected_row, selected_col]
+                    # Handle both 1D (RSP) and 2D (HARP2) indexing
+                    prop_data = filtered_data[prop_key]
+                    if prop_data.ndim == 1:
+                        # 1D data (RSP): use selected_row as index
+                        value = prop_data[selected_row]
+                    elif prop_data.ndim == 2:
+                        # 2D data (HARP2): use [row, col] indexing
+                        value = prop_data[selected_row, selected_col]
+                    else:
+                        value = np.nan
+
                     if np.isfinite(value):
                         mode_values[mode] = f"{value:.3f}"
                     else:
@@ -333,8 +466,8 @@ def create_properties_table_safe(filtered_data, selected_row, selected_col):
 
         # Create row if at least one mode has data
         if any(val not in ["-", "N/A"] for val in mode_values.values()):
-            # Use * for 556nm properties, show wavelength for others
-            if wavelength == '556':
+            # Use * for reference wavelength properties, show wavelength for others
+            if wavelength == ref_wl:
                 property_label = f"{prop_display}*"
             elif wavelength:
                 property_label = f"{prop_display} ({wavelength}nm)"
@@ -347,7 +480,7 @@ def create_properties_table_safe(filtered_data, selected_row, selected_col):
                 *[html.Td(mode_values.get(mode, "-"),
                           style={'textAlign': 'center', 'padding': '8px',
                                  'borderBottom': '1px solid #ecf0f1',
-                                 'color': mode_colors[mode] if mode_values.get(mode, "-") not in ["-", "N/A"] else '#95a5a6'})
+                                 'color': mode_colors.get(mode, '#95a5a6') if mode_values.get(mode, "-") not in ["-", "N/A"] else '#95a5a6'})
                   for mode in modes]
             ])
             table_rows.append(row)
@@ -359,28 +492,73 @@ def create_properties_table_compact(filtered_data, selected_row, selected_col, s
     """
     Create a compact table showing properties by mode with metadata header
     """
+    # Helper function to extract scalar from potentially multi-dimensional data
+    def extract_scalar(value):
+        """Extract first scalar value from potentially nested array"""
+        if value is None:
+            return None
+        # Keep extracting first element until we get a scalar
+        while hasattr(value, '__len__') and not isinstance(value, str):
+            if len(value) == 0:
+                return None
+            value = value.flat[0] if hasattr(value, 'flat') else value[0]
+        # Convert numpy types to Python types
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return None
+
     # Extract metadata values
     try:
+        # Determine data dimensionality from original_shape
+        original_shape = filtered_data.get('original_shape', None)
+        is_1d = original_shape is not None and len(original_shape) == 1
+
+        # Handle SZA (Solar Zenith Angle)
         sza = filtered_data.get('sza', None)
-        sza_val = sza[selected_row, selected_col]
-        sza_val = sza_val[0]
-        sza_val = np.degrees(np.arccos(sza_val))
+        if sza is not None:
+            if is_1d:
+                sza_val = extract_scalar(sza[selected_row])
+            else:
+                sza_val = extract_scalar(sza[selected_row, selected_col])
+            # Convert from cosine to degrees
+            sza_val = np.degrees(np.arccos(sza_val)) if sza_val is not None and np.isfinite(sza_val) else None
+        else:
+            sza_val = None
 
+        # Handle RAA (Relative Azimuth Angle)
         raa = filtered_data.get('raa', None)
-        raa_val = raa[selected_row, selected_col]
-        raa_val = raa_val[0]
+        if raa is not None:
+            if is_1d:
+                raa_val = extract_scalar(raa[selected_row])
+            else:
+                raa_val = extract_scalar(raa[selected_row, selected_col])
+            raa_val = raa_val if raa_val is not None and np.isfinite(raa_val) else None
+        else:
+            raa_val = None
 
+        # Handle cost function
         cost = filtered_data.get('cost_function', None)
-        cost_val = cost[selected_row, selected_col] if cost is not None else None
+        if cost is not None:
+            if is_1d:
+                cost_val = extract_scalar(cost[selected_row])
+            else:
+                cost_val = extract_scalar(cost[selected_row, selected_col])
+        else:
+            cost_val = None
 
         # Get selected property value
         selected_val = None
         if selected_property in filtered_data:
             prop_data = filtered_data[selected_property]
-            if prop_data.ndim == 2:
-                selected_val = prop_data[selected_row, selected_col]
+            if is_1d:
+                selected_val = extract_scalar(prop_data[selected_row])
+            else:
+                selected_val = extract_scalar(prop_data[selected_row, selected_col])
     except Exception as e:
         print(f"Error extracting metadata: {e}")
+        import traceback
+        traceback.print_exc()
         sza_val = raa_val = cost_val = selected_val = None
 
     # Create metadata section
@@ -433,29 +611,27 @@ def create_properties_table_compact(filtered_data, selected_row, selected_col, s
         'textAlign': 'left'
     }) if metadata_items else None
 
+    # Get reference wavelength and available modes dynamically
+    ref_wl = get_reference_wavelength(filtered_data)
+    modes = get_available_modes(filtered_data)
+    mode_colors = get_mode_colors()
+
     # Define the properties and their display names (same as before)
     properties_config = [
-        ('optical_depth', 'Optical Depth', '556'),
-        ('ssa', 'Single Scattering Albedo', '556'),
-        ('real', 'Real Refractive Index', '556'),
-        ('imag', 'Imaginary Refractive Index', '556'),
-        ('asymmetry', 'Asymmetry Parameter', '556'),
-        ('cross_section', 'Cross Section', '556'),
-        ('number_concentration', 'Number Concentration', '556'),
+        ('optical_depth', 'Optical Depth', ref_wl),
+        ('ssa', 'Single Scattering Albedo', ref_wl),
+        ('real', 'Real Refractive Index', ref_wl),
+        ('imag', 'Imaginary Refractive Index', ref_wl),
+        ('asymmetry', 'Asymmetry Parameter', ref_wl),
+        ('cross_section', 'Cross Section', ref_wl),
+        ('number_concentration', 'Number Concentration', ref_wl),
         ('reff', 'Effective Radius', ''),
         ('veff', 'Effective Variance', ''),
     ]
 
-    modes = ['fine', 'coarse', 'dust']
-    mode_colors = {
-        'fine': '#3498db',
-        'coarse': '#e74c3c',
-        'dust': '#f39c12'
-    }
-
     # Create table header
     header = html.Tr([
-        html.Th("Property (* 556 nm)", style={
+        html.Th(f"Property (* {ref_wl} nm)", style={
             'textAlign': 'left',
             'padding': '6px',
             'borderBottom': '2px solid #34495e',
@@ -466,7 +642,7 @@ def create_properties_table_compact(filtered_data, selected_row, selected_col, s
             'textAlign': 'center',
             'padding': '6px',
             'borderBottom': '2px solid #34495e',
-            'color': mode_colors[mode],
+            'color': mode_colors.get(mode, '#95a5a6'),
             'fontWeight': 'bold',
             'fontSize': '14px'
         }) for mode in modes]
@@ -487,7 +663,17 @@ def create_properties_table_compact(filtered_data, selected_row, selected_col, s
 
             if prop_key in filtered_data:
                 try:
-                    value = filtered_data[prop_key][selected_row, selected_col]
+                    # Handle both 1D (RSP) and 2D (HARP2) indexing
+                    prop_data = filtered_data[prop_key]
+                    if prop_data.ndim == 1:
+                        # 1D data (RSP): use selected_row as index
+                        value = prop_data[selected_row]
+                    elif prop_data.ndim == 2:
+                        # 2D data (HARP2): use [row, col] indexing
+                        value = prop_data[selected_row, selected_col]
+                    else:
+                        value = np.nan
+
                     if np.isfinite(value):
                         mode_values[mode] = f"{value:.3f}"
                         has_data = True
@@ -499,7 +685,8 @@ def create_properties_table_compact(filtered_data, selected_row, selected_col, s
                 mode_values[mode] = "-"
 
         if has_data and any(val not in ["-", "N/A"] for val in mode_values.values()):
-            if wavelength == '556':
+            # Use * for reference wavelength properties, show wavelength for others
+            if wavelength == ref_wl:
                 property_label = f"{prop_display}*"
             elif wavelength:
                 property_label = f"{prop_display} ({wavelength}nm)"
@@ -524,7 +711,7 @@ def create_properties_table_compact(filtered_data, selected_row, selected_col, s
                     'textAlign': 'center',
                     'padding': '6px',
                     'borderBottom': '1px solid #ecf0f1',
-                    'color': mode_colors[mode] if mode_values.get(mode, "-") not in ["-", "N/A"] else '#95a5a6',
+                    'color': mode_colors.get(mode, '#95a5a6') if mode_values.get(mode, "-") not in ["-", "N/A"] else '#95a5a6',
                     'fontSize': '12px',
                     'fontFamily': 'monospace',
                     'backgroundColor': '#e8f5e9' if is_selected else 'transparent'
@@ -617,7 +804,17 @@ def create_properties_table_compact_safe(filtered_data, selected_row, selected_c
 
             if prop_key in filtered_data:
                 try:
-                    value = filtered_data[prop_key][selected_row, selected_col]
+                    # Handle both 1D (RSP) and 2D (HARP2) indexing
+                    prop_data = filtered_data[prop_key]
+                    if prop_data.ndim == 1:
+                        # 1D data (RSP): use selected_row as index
+                        value = prop_data[selected_row]
+                    elif prop_data.ndim == 2:
+                        # 2D data (HARP2): use [row, col] indexing
+                        value = prop_data[selected_row, selected_col]
+                    else:
+                        value = np.nan
+
                     if np.isfinite(value):
                         mode_values[mode] = f"{value:.3f}"
                         has_data = True
@@ -688,10 +885,10 @@ def create_properties_table_compact_safe(filtered_data, selected_row, selected_c
 # =============================================================================
 # CONFIGURATION AND CONSTANTS
 # =============================================================================
-def get_wavelength_instrument_mapping():
+def get_wavelength_mapping_pace():
     """
-    Returns wavelength-instrument mapping with vza counts.
-    Modify this to add new instruments/wavelengths.
+    Returns wavelength-instrument mapping for PACE files (HARP/SPEX/OCI).
+    Modify this to add new PACE instruments/wavelengths.
 
     Returns:
         wavelength_mapping (list): containing each measurement wavelength,
@@ -715,6 +912,45 @@ def get_wavelength_instrument_mapping():
     ]
 
     return wavelength_mapping
+
+
+def get_wavelength_mapping_rsp():
+    """
+    Returns wavelength-instrument mapping for RSP files.
+    Modify this to add new RSP wavelengths.
+
+    RSP has 504 viewing angles total, shared across all wavelengths.
+    Each wavelength has 126 viewing angles (504 / 4 wavelengths).
+
+    Returns:
+        wavelength_mapping (list): containing each measurement wavelength,
+            corresponding instrument, and number of views.
+    """
+    wavelength_mapping = [
+        (555, 'RSP', 126),
+        (410, 'RSP', 126),
+        (469, 'RSP', 126),
+        (670, 'RSP', 126)
+    ]
+
+    return wavelength_mapping
+
+
+def get_wavelength_instrument_mapping(file_format='HARP2'):
+    """
+    Dispatcher function that returns the appropriate wavelength mapping
+    based on file format.
+
+    Args:
+        file_format (str): File format type ('HARP2', 'RSP', etc.)
+
+    Returns:
+        wavelength_mapping (list): format-specific wavelength mapping
+    """
+    if file_format == 'RSP':
+        return get_wavelength_mapping_rsp()
+    else:  # Default to PACE/HARP2
+        return get_wavelength_mapping_pace()
 
 
 def build_channel_ranges(wavelength_mapping, output_channels_order=None):
@@ -811,6 +1047,28 @@ def get_instrument_for_wavelength(wavelength, wavelength_mapping):
 # =============================================================================
 # DATA I/O AND PROCESSING FUNCTIONS
 # =============================================================================
+def load_retrieval_file(file_path):
+    """
+    Wrapper function that detects file format and routes to appropriate reader.
+    Use this instead of calling read_hdf5_variables or read_rsp_hdf5_variables directly.
+
+    Args:
+        file_path: (str) path to the retrieval file
+
+    Returns:
+        data_dict (dict):
+        sorted_variables (list):
+        display_names (dict):
+        variable_metadata (dict):
+    """
+    file_format = detect_file_format(file_path)
+
+    if file_format == 'RSP':
+        return read_rsp_hdf5_variables(file_path)
+    else:  # HARP2 or default
+        return read_hdf5_variables(file_path)
+
+
 def read_hdf5_variables(file_path):
     """
     Read variables from HDF5 file and return dictionaries of datasets
@@ -967,6 +1225,22 @@ def read_hdf5_variables(file_path):
                     print(f"Variable {key} with shape {dataset.shape} stored but not in dropdown")
                     skipped_variables.append(f"{key} (shape: {dataset.shape})")
 
+            # Detect available aerosol modes dynamically
+            # Check for any wavelength - if mode exists for any wavelength, it's available
+            available_modes = set()
+            possible_modes = ['fine', 'coarse', 'dust', 'sea_salt']
+
+            for mode in possible_modes:
+                # Check if any variable with this mode exists
+                mode_found = any(mode in key for key in available_variables)
+                if mode_found:
+                    available_modes.add(mode)
+
+            # Store available modes in data_dict
+            data_dict['available_modes'] = sorted(list(available_modes))
+            if debug > 0:
+                print(f"Available aerosol modes: {data_dict['available_modes']}")
+
             # Compute total AOD for each wavelength
             if wavelengths is not None:
                 for wl in wavelengths:
@@ -1102,6 +1376,9 @@ def read_hdf5_variables(file_path):
                     wl = var.split('_')[-1]
                     display_names[var] = f"Optical Depth (Total) - {wl} nm"
 
+            # Store file format for later use
+            data_dict['file_format'] = 'HARP2'
+
             return data_dict, sorted_variables, display_names, variable_metadata
 
     except Exception as e:
@@ -1109,10 +1386,432 @@ def read_hdf5_variables(file_path):
         raise
 
 
+def read_rsp_hdf5_variables(file_path):
+    """
+    Read variables from RSP HDF5 file and return dictionaries of datasets
+    in the same format as read_hdf5_variables (HARP2 format).
+
+    This function:
+    - Reads RSP-specific variable names and structure
+    - Converts to HARP2-compatible naming convention
+    - Reshapes data to match expected formats
+    - Dynamically detects available aerosol modes
+
+    Args:
+        file_path: (str) path to the RSP retrieval file
+
+    Returns:
+        data_dict (dict): Dictionary with standardized variable names
+        sorted_variables (list): List of available variables for dropdown
+        display_names (dict): Display names for variables
+        variable_metadata (dict): Metadata about variables
+    """
+    excluded_var_strings = ['total_iterations', 'best_iteration', 'data_cf',
+                            '_unc', 'prior_cf', 'state_vector', 'total_cf',
+                            'error_covariance', 'unc_woc'
+                            ]
+
+    try:
+        # Open the HDF5 file
+        with h5py.File(file_path, 'r') as f:
+            # Initialize dictionary to store variables and arrays for plotting
+            data_dict = {}
+
+            # Place the file_path in the dictionary
+            data_dict['file_path'] = file_path
+
+            # Read lat/lon - RSP format has shape (42, 1) that needs squeezing
+            if 'lat' in f:
+                lat = f['lat'][:].squeeze()  # (42, 1) -> (42,)
+                lon = f['lon'][:].squeeze()  # (42, 1) -> (42,)
+
+                # Store lat/lon arrays
+                data_dict['latitude'] = lat
+                data_dict['longitude'] = lon
+                base_length = len(lat)
+
+                # Store original shapes for reference (RSP is 1D)
+                original_shape = lat.shape
+                data_dict['original_shape'] = original_shape
+                if debug > 1:
+                    print(f"Base dimension length: {base_length}")
+
+                # Check for NaN values
+                lat_nan_count = np.isnan(lat).sum()
+                lon_nan_count = np.isnan(lon).sum()
+                if lat_nan_count > 0 or lon_nan_count > 0 and debug > 1:
+                    print(f"Warning: Found {lat_nan_count} NaN values in lat and {lon_nan_count} in lon")
+            else:
+                raise ValueError("Latitude/longitude data not found in RSP file")
+
+            # Get viewing zenith angles (sensor_zenith in RSP)
+            if 'sensor_zenith' in f:
+                sensor_zenith = f['sensor_zenith'][:]
+                data_dict['sensor_zenith'] = sensor_zenith
+
+                # Check for NaN values
+                nan_count = np.isnan(sensor_zenith).sum()
+                if nan_count > 0 and debug > 1:
+                    print(f"Warning: Found {nan_count} NaN values in sensor_zenith")
+
+            # Get relative azimuth angles
+            if 'raa' in f:
+                raa = f['raa'][:]
+                data_dict['raa'] = raa
+
+            # Get solar zenith angles
+            if 'sza' in f:
+                sza = f['sza'][:]
+                data_dict['sza'] = sza
+
+            # Get measurement and model vectors for intensity and DoLP
+            if 'ymvec' in f:
+                ymvec = f['ymvec'][:]
+                data_dict['ymvec'] = ymvec
+
+            if 'fvec' in f:
+                fvec = f['fvec'][:]
+                data_dict['fvec'] = fvec
+
+            # Get cost function (RSP naming)
+            if 'retrieval_normalized_cost_function_data' in f:
+                data_dict['cost_function'] = f['retrieval_normalized_cost_function_total'][:]
+                data_dict['cost_function_data'] = f['retrieval_normalized_cost_function_data'][:]
+            else:
+                # Create a placeholder cost function
+                print("Cost function not found, creating placeholder")
+                data_dict['cost_function'] = np.random.uniform(0, 10, base_length)
+
+            # Get wavelength information (output_channels in RSP)
+            wavelengths = None
+            if 'output_channels' in f:
+                wavelengths = f['output_channels'][:]
+                data_dict['wavelengths'] = wavelengths
+                data_dict['output_channels'] = wavelengths
+                if debug > 1:
+                    print(f"RSP wavelengths (output_channels): {wavelengths}")
+
+            # Get time data for RSP (if available)
+            if 'rsp_time' in f:
+                data_dict['rsp_time'] = f['rsp_time'][:]
+                if debug > 1:
+                    print(f"RSP time data loaded: shape {data_dict['rsp_time'].shape}")
+
+            # Now read all root-level datasets and convert to HARP2 naming
+            available_variables = []
+            variable_metadata = {}
+            skipped_variables = []
+
+            # Get all keys at root level
+            root_keys = [k for k in f.keys()]
+
+            # Process each dataset at root level
+            for key in root_keys:
+                # Skip groups
+                if isinstance(f[key], h5py.Group):
+                    continue
+
+                # Skip variables we already processed
+                if key in ['lat', 'lon', 'sensor_zenith', 'raa', 'sza', 'ymvec', 'fvec',
+                           'retrieval_normalized_cost_function_data',
+                           'retrieval_normalized_cost_function_total',
+                           'output_channels', 'rsp_time']:
+                    continue
+
+                # Skip excluded variables
+                if any(exclude in key for exclude in excluded_var_strings):
+                    continue
+
+                # Only process aerosol-related variables
+                if not key.startswith('aerosol_'):
+                    continue
+
+                dataset = f[key]
+                if debug > 1:
+                    print(f"Processing RSP variable: {key} with shape {dataset.shape}")
+
+                # Read the data
+                data_array = dataset[:]
+
+                # Convert RSP variable name to HARP2 format
+                # Remove "aerosol_" prefix
+                harp2_name = key.replace('aerosol_', '')
+
+                # Check for NaN values
+                nan_count = np.isnan(data_array).sum()
+                if nan_count > 0 and debug > 1:
+                    print(f"Warning: Found {nan_count} NaN values in {key}")
+
+                # Handle different data shapes
+                if data_array.ndim == 1 and data_array.shape[0] == base_length:
+                    # 1D array matching spatial dimension - store as is and as _2d
+                    data_dict[harp2_name] = data_array
+                    data_dict[f"{harp2_name}_2d"] = data_array  # RSP 1D = HARP2 "2D" flattened
+                    available_variables.append(harp2_name)
+
+                    # Check if spectral variable (ends with wavelength number)
+                    parts = harp2_name.split('_')
+                    if len(parts) > 0 and parts[-1].isdigit():
+                        wl = int(parts[-1])
+                        base_name = '_'.join(parts[:-1])
+                        variable_metadata[harp2_name] = {
+                            'type': 'spectral',
+                            'wavelength': wl,
+                            'base_name': base_name
+                        }
+                        if debug > 1:
+                            print(f"Added spectral variable {harp2_name} with wavelength {wl} nm")
+                    else:
+                        variable_metadata[harp2_name] = {'type': '1D'}
+                        if debug > 1:
+                            print(f"Added 1D variable {harp2_name}")
+
+                elif data_array.ndim == 2:
+                    # 2D array (wavelength, spatial) - store but don't add to dropdown yet
+                    # We'll extract specific wavelengths later if needed
+                    data_dict[f"{harp2_name}_multi_wl"] = data_array
+                    if debug > 1:
+                        print(f"Stored multi-wavelength variable {harp2_name} with shape {data_array.shape}")
+                else:
+                    # Other dimensions - store but skip
+                    data_dict[harp2_name] = data_array
+                    skipped_variables.append(f"{harp2_name} (shape: {data_array.shape})")
+
+            # Extract individual wavelengths from multi-wavelength 2D arrays
+            # RSP stores wavelength-dependent data as (n_wavelengths, n_spatial_points)
+            # with wavelengths in separate arrays like aerosol_optical_depth_wavelengths
+            multi_wl_variables = [key for key in data_dict.keys() if key.endswith('_multi_wl')]
+
+            for multi_wl_key in multi_wl_variables:
+                # Get the base variable name (remove _multi_wl suffix)
+                base_var_name = multi_wl_key[:-9]  # Remove '_multi_wl'
+
+                # Look for corresponding wavelength array
+                # Extract base property name (e.g., optical_depth from optical_depth_fine)
+                parts = base_var_name.split('_')
+                if len(parts) >= 2:
+                    # Remove mode suffix to get property name
+                    possible_modes_list = ['fine', 'coarse', 'dust', 'sea_salt']
+                    if parts[-1] in possible_modes_list:
+                        property_base = '_'.join(parts[:-1])
+                    else:
+                        property_base = base_var_name
+                else:
+                    property_base = base_var_name
+
+                wl_array_names = [
+                    f'aerosol_{property_base}_wavelengths',  # e.g., aerosol_optical_depth_wavelengths
+                    f'{property_base}_wavelengths',
+                    f'aerosol_{base_var_name}_wavelengths',  # Also try with mode
+                    f'{base_var_name}_wavelengths',
+                ]
+
+                wavelengths_data = None
+                for wl_name in wl_array_names:
+                    if wl_name in f:
+                        wavelengths_data = f[wl_name][:]
+                        if debug > 1:
+                            print(f"Found wavelengths for {base_var_name}: {wavelengths_data}")
+                        break
+
+                # If no wavelength array found, try to use output_channels
+                if wavelengths_data is None and wavelengths is not None:
+                    wavelengths_data = wavelengths
+                    if debug > 1:
+                        print(f"Using output_channels for {base_var_name}")
+
+                if wavelengths_data is not None:
+                    multi_wl_data = data_dict[multi_wl_key]
+
+                    # Extract data for each wavelength
+                    for wl_idx, wl_value in enumerate(wavelengths_data):
+                        wl_int = int(round(wl_value))
+
+                        # Extract the row corresponding to this wavelength
+                        if wl_idx < multi_wl_data.shape[0]:
+                            wl_data = multi_wl_data[wl_idx, :]
+
+                            # Create variable name with wavelength suffix
+                            var_name_with_wl = f"{base_var_name}_{wl_int}"
+
+                            # Store the data
+                            data_dict[var_name_with_wl] = wl_data
+                            data_dict[f"{var_name_with_wl}_2d"] = wl_data  # RSP 1D = HARP2 "2D" flattened
+                            available_variables.append(var_name_with_wl)
+
+                            variable_metadata[var_name_with_wl] = {
+                                'type': 'spectral',
+                                'wavelength': wl_int,
+                                'base_name': base_var_name
+                            }
+
+                            if debug > 1:
+                                print(f"Extracted {var_name_with_wl} from multi-wavelength data")
+
+            # Detect available aerosol modes dynamically
+            available_modes = set()
+            possible_modes = ['fine', 'coarse', 'dust', 'sea_salt']
+
+            for mode in possible_modes:
+                # Check if any variable with this mode exists
+                mode_found = any(mode in key for key in available_variables)
+                if mode_found:
+                    available_modes.add(mode)
+
+            # Store available modes in data_dict
+            data_dict['available_modes'] = sorted(list(available_modes))
+            if debug > 0:
+                print(f"Available aerosol modes in RSP file: {data_dict['available_modes']}")
+
+            # Compute total AOD for wavelengths where we have component data
+            # First, find all unique wavelengths present in the optical_depth variables
+            aod_wavelengths = set()
+            for var in available_variables:
+                if 'optical_depth' in var and var.startswith('optical_depth_'):
+                    parts = var.split('_')
+                    if len(parts) > 0 and parts[-1].isdigit():
+                        aod_wavelengths.add(int(parts[-1]))
+
+            if debug > 1:
+                print(f"Found optical depth data for wavelengths: {sorted(aod_wavelengths)}")
+
+            for wl in sorted(aod_wavelengths):
+                # Check if we have component AODs for this wavelength
+                fine_key = f"optical_depth_fine_{wl}"
+                dust_key = f"optical_depth_dust_{wl}"
+
+                fine_key_2d = f"{fine_key}_2d"
+                dust_key_2d = f"{dust_key}_2d"
+
+                has_fine = fine_key_2d in data_dict
+                has_dust = dust_key_2d in data_dict
+
+                if has_fine or has_dust:
+                    # Initialize total AOD array
+                    total_aod = np.full(original_shape, np.nan)
+
+                    # Mask to track valid data
+                    valid_data_mask = np.zeros(original_shape, dtype=bool)
+
+                    # Initialize sum with zeros
+                    aod_sum = np.zeros(original_shape)
+
+                    # Add each component (where valid data)
+                    if has_fine:
+                        fine_data = data_dict[fine_key_2d]
+                        fine_valid = ~np.isnan(fine_data)
+                        valid_data_mask |= fine_valid
+                        aod_sum = np.where(fine_valid, aod_sum + np.nan_to_num(fine_data, nan=0.0), aod_sum)
+
+                    if has_dust:
+                        dust_data = data_dict[dust_key_2d]
+                        dust_valid = ~np.isnan(dust_data)
+                        valid_data_mask |= dust_valid
+                        aod_sum = np.where(dust_valid, aod_sum + np.nan_to_num(dust_data, nan=0.0), aod_sum)
+
+                    # Only assign total aod where at least one component is not NaN
+                    total_aod = np.where(valid_data_mask, aod_sum, np.nan)
+
+                    # Store both versions
+                    total_key = f"optical_depth_total_{wl}"
+                    data_dict[f"{total_key}_2d"] = total_aod
+                    data_dict[total_key] = total_aod  # Already 1D for RSP
+
+                    available_variables.append(total_key)
+                    variable_metadata[total_key] = {
+                        'type': 'spectral',
+                        'wavelength': wl,
+                        'base_name': 'optical_depth_total'
+                    }
+                    if debug > 1:
+                        print(f"Computed total optical depth for {wl} nm")
+                else:
+                    if debug > 1:
+                        print(f"No component optical depths for {wl} nm, cannot compute total AOD")
+
+            # Get display names and sort variables (same as HARP2)
+            display_names = {}
+
+            # Group variables by base name for sorting
+            grouped_vars = {}
+            for var in available_variables:
+                metadata = variable_metadata.get(var, {'type': 'other'})
+                if metadata['type'] == 'spectral':
+                    base_name = metadata['base_name']
+                    wl = metadata['wavelength']
+
+                    # Clean up the name for dropdown
+                    display_name = base_name.replace('_', ' ').title()
+                    replacements = {
+                        'Ssa': 'Single Scattering Albedo',
+                        'Reff': 'Effective Radius',
+                        'Veff': 'Effective Variance',
+                        'Fine': '(Fine Mode)',
+                        'Coarse': '(Coarse Mode)',
+                        'Dust': '(Dust)',
+                        'Sea Salt': '(Sea Salt)',
+                        'Total': '(Total)'
+                    }
+                    for old, new in replacements.items():
+                        display_name = display_name.replace(old, new)
+
+                    display_name = f"{display_name} - {wl} nm"
+                    display_names[var] = display_name
+
+                    # Group by base name
+                    if base_name not in grouped_vars:
+                        grouped_vars[base_name] = []
+                    grouped_vars[base_name].append((var, wl))
+                else:
+                    # Standard display if any non-spectral variables added
+                    display_name = var.replace('_', ' ').replace('fine', ' (fine mode)').replace('dust', ' (dust)').replace('reff', 'effective radius').replace('veff', 'effective variance')
+                    display_names[var] = display_name.title()
+
+            # Sort spectral variables by wavelength within each group
+            sorted_variables = []
+
+            # First add non-spectral
+            non_spectral = [var for var in available_variables if variable_metadata.get(var, {}).get('type') != 'spectral']
+            sorted_variables.extend(sorted(non_spectral))
+
+            # Now add spectral variables by base name and wavelength
+            for base_name in sorted(grouped_vars.keys()):
+                # Sort by wavelength
+                sorted_group = sorted(grouped_vars[base_name], key=lambda x: x[1])
+                sorted_variables.extend([var for var, _ in sorted_group])
+
+            # Update display names for total AOD
+            for var in available_variables:
+                if 'optical_depth_total' in var:
+                    wl = var.split('_')[-1]
+                    display_names[var] = f"Optical Depth (Total) - {wl} nm"
+
+            # Store file format for later use
+            data_dict['file_format'] = 'RSP'
+
+            # Get reference wavelength
+            if 'aerosol_optical_depth_wavelengths' in f:
+                ref_wl = f['aerosol_optical_depth_wavelengths'][:]
+                data_dict['reference_wavelength'] = ref_wl[0]
+                if debug > 1:
+                    print(f"RSP AOD reference wavelength: {ref_wl[0]}")
+
+            if debug > 0:
+                print(f"RSP reader: Loaded {len(available_variables)} variables")
+
+            return data_dict, sorted_variables, display_names, variable_metadata
+
+    except Exception as e:
+        print(f"Error reading RSP file: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise
+
+
 def filter_by_cost(data_dict, max_cost=None):
     """
-    Filter data by cost function, updated to handle 2d arrays and NaN values
-    and preserve dimension. Sets points that fial the filtering to infinity.
+    Filter data by cost function, updated to handle 1D and 2D arrays and NaN values
+    and preserve dimension. Sets points that fail the filtering to infinity.
     NaN values are preserved (filtered out before plotting) so small edits
     can be made to allow user to see where retrieval fails.
 
@@ -1129,64 +1828,87 @@ def filter_by_cost(data_dict, max_cost=None):
     if original_shape is None:
         raise ValueError("original_shape not found in data_dict")
 
-    # Get the cost function and ensure it's 2D
+    # Calculate total points based on shape dimensionality
+    if len(original_shape) == 1:
+        # 1D data (e.g., RSP)
+        total_points = original_shape[0]
+    elif len(original_shape) == 2:
+        # 2D data (e.g., HARP2)
+        total_points = original_shape[0] * original_shape[1]
+    else:
+        raise ValueError(f"Unexpected original_shape dimensionality: {len(original_shape)}D")
+
+    # Get the cost function and ensure it matches original_shape
     if 'cost_function' in data_dict:
-        cost_2d = data_dict['cost_function']
-        if cost_2d.ndim == 1:
-            # reshape if it's somehow flattened
-            cost_2d = cost_2d.reshape(original_shape)
+        cost_array = data_dict['cost_function']
+        if cost_array.ndim == 1 and len(original_shape) == 2:
+            # Reshape if flattened but should be 2D
+            cost_array = cost_array.reshape(original_shape)
+        elif cost_array.ndim == 1 and len(original_shape) == 1:
+            # Already correct shape for 1D data
+            pass
     else:
         raise ValueError("cost_function not found in data_dict")
 
     # Create cost mask
     if max_cost is None:
-        # If no max_max cost, all finite values pass (we keep NaN: see above)
-        cost_mask_2d = ~np.isinf(cost_2d)
+        # If no max cost, all finite values pass (we keep NaN: see above)
+        cost_mask = ~np.isinf(cost_array)
     else:
         # Points pass if non NaN AND cost <= max_cost
         # Points that are NaN stay NaN and are filtered before plotting
-        # Points that fail xost filtering set to infinity
-        cost_mask_2d = (~np.isnan(cost_2d)) & (cost_2d <= max_cost)
+        # Points that fail cost filtering set to infinity
+        cost_mask = (~np.isnan(cost_array)) & (cost_array <= max_cost)
 
     # Create filtered dict
     filtered_dict = {}
 
     for key, value in data_dict.items():
-        if key in ['file_path', 'original_shape', 'wavelengths', 'output_channels']:
+        if key in ['file_path', 'original_shape', 'wavelengths', 'output_channels', 'available_modes']:
             # Keep metadata as is
             filtered_dict[key] = value
 
         elif isinstance(value, np.ndarray):
-            if value.ndim == 2 and value.shape == original_shape:
-                # 2d arrays: set cost filtered points to inf
+            # Handle arrays based on shape matching
+            if value.shape == original_shape:
+                # Array matches original shape (1D or 2D): apply cost filter
                 filtered_value = value.copy().astype(float)
-                filtered_value[~cost_mask_2d] = np.inf
+                filtered_value[~cost_mask] = np.inf
                 filtered_dict[key] = filtered_value
-            elif value.ndim == 3 and value.shape[:2] == original_shape:
-                # 3d arrays (ymvec, fvec, vza): set cost filtered points to inf
+            elif len(original_shape) == 2 and value.ndim == 3 and value.shape[:2] == original_shape:
+                # 3D arrays for 2D data (ymvec, fvec, vza): set cost filtered points to inf
                 filtered_value = value.copy().astype(float)
-                filtered_value[~cost_mask_2d, :] = np.inf
+                filtered_value[~cost_mask, :] = np.inf
                 filtered_dict[key] = filtered_value
-            elif value.ndim == 1 and len(value) == (original_shape[0] * original_shape[1]):
-                # 1d arrays that should be 2d: reshape and apply cost filter
-                value_2d = value.reshape(original_shape).astype(float)
-                value_2d[~cost_mask_2d] = np.inf
-                filtered_dict[key] = value_2d
+            elif len(original_shape) == 1 and value.ndim == 2 and value.shape[0] == original_shape[0]:
+                # 2D arrays for 1D data (e.g., RSP ymvec with shape (42, 1008))
+                filtered_value = value.copy().astype(float)
+                filtered_value[~cost_mask, :] = np.inf
+                filtered_dict[key] = filtered_value
+            elif len(original_shape) == 1 and value.ndim == 3 and value.shape[0] == original_shape[0]:
+                # 3D arrays for 1D data (e.g., RSP angles with shape (42, 1, 504))
+                filtered_value = value.copy().astype(float)
+                filtered_value[~cost_mask, :, :] = np.inf
+                filtered_dict[key] = filtered_value
+            elif value.ndim == 1 and len(value) == total_points:
+                # 1D arrays matching total points: reshape to original_shape and apply filter
+                value_reshaped = value.reshape(original_shape).astype(float)
+                value_reshaped[~cost_mask] = np.inf
+                filtered_dict[key] = value_reshaped
             else:
-                # Arrays with differend dimension, keep as is
+                # Arrays with different dimension, keep as is
                 filtered_dict[key] = value
         else:
             # Non array values keep as is
             filtered_dict[key] = value
 
     # Return original_indices (all points) for compatibility with existing code
-    # The plotting function can determing valid points using np.isfinite
-    total_points = original_shape[0] * original_shape[1]
+    # The plotting function can determine valid points using np.isfinite
     original_indices = np.arange(total_points)
 
     # Debug
-    valid_count = cost_mask_2d.sum()
-    nan_count = np.isnan(cost_2d).sum()
+    valid_count = cost_mask.sum()
+    nan_count = np.isnan(cost_array).sum()
     cost_filtered_count = total_points - valid_count - nan_count
 
     if debug > 1:
@@ -1195,7 +1917,7 @@ def filter_by_cost(data_dict, max_cost=None):
         print(f"  {cost_filtered_count} points failed cost filter (set to infinity)")
         print(f"  {nan_count} points have NaN (retrieval failure)")
         print(f"  Total: {total_points} points")
-        print(f"Cost range: {np.nanmin(cost_2d):.3f} to {np.nanmax(cost_2d):.3f}")
+        print(f"Cost range: {np.nanmin(cost_array):.3f} to {np.nanmax(cost_array):.3f}")
         if max_cost is not None:
             print(f"Max cost threshold: {max_cost:.3f}")
 
@@ -1234,7 +1956,8 @@ def get_channel_intensity_dolp_vza(data_dict, row_idx, col_idx):
         print(f"Processing point at grid position [{row_idx}, {col_idx}]")
 
     # Get wavel-instrument mapping and build channel ranges dynamically
-    wavelength_mapping = get_wavelength_instrument_mapping()
+    file_format = data_dict.get('file_format', 'HARP2')
+    wavelength_mapping = get_wavelength_instrument_mapping(file_format)
 
     # Use order from output_channels or wavelengths in file
     output_channels = data_dict.get('wavelengths', None)
@@ -1245,6 +1968,7 @@ def get_channel_intensity_dolp_vza(data_dict, row_idx, col_idx):
 
     # Extract data for the specific spatial location [row_idx, col_idx]
     if ymvec.ndim == 3 and ymvec.shape[:2] == original_shape:
+        # 3D case: HARP2 format (lat, lon, measurements)
         # Extract measurement and model vectors for this point
         point_ymvec = ymvec[row_idx, col_idx, :]
         point_fvec = fvec[row_idx, col_idx, :]
@@ -1266,12 +1990,36 @@ def get_channel_intensity_dolp_vza(data_dict, row_idx, col_idx):
             print("Warning: NaN values found in measurement data for point [{}, {}]".format(row_idx, col_idx))
         if np.any(np.isnan(fvec_intensity)) or np.any(np.isnan(fvec_dolp)):
             print("Warning: NaN values found in model data for point [{}, {}]".format(row_idx, col_idx))
+    elif ymvec.ndim == 2 and len(original_shape) == 1 and ymvec.shape[0] == original_shape[0]:
+        # 2D case: RSP format (spatial_points, measurements)
+        # Extract measurement and model vectors for this point
+        point_ymvec = ymvec[row_idx, :]
+        point_fvec = fvec[row_idx, :]
+
+        # Validate expected length
+        expected_length = total_intensity_angles + total_dolp_angles
+        if len(point_ymvec) != expected_length:
+            print("Warning: Expected ymvec length {}, got {}".format(expected_length, len(point_ymvec)))
+
+        # Separate into intensity and dolp
+        ymvec_intensity = point_ymvec[:total_intensity_angles]
+        ymvec_dolp = point_ymvec[total_intensity_angles:total_intensity_angles + total_dolp_angles]
+
+        fvec_intensity = point_fvec[:total_intensity_angles]
+        fvec_dolp = point_fvec[total_intensity_angles:total_intensity_angles + total_dolp_angles]
+
+        # Check for NaN and warn
+        if np.any(np.isnan(ymvec_intensity)) or np.any(np.isnan(ymvec_dolp)):
+            print("Warning: NaN values found in measurement data for point [{}]".format(row_idx))
+        if np.any(np.isnan(fvec_intensity)) or np.any(np.isnan(fvec_dolp)):
+            print("Warning: NaN values found in model data for point [{}]".format(row_idx))
     else:
         raise ValueError("Unexpected shape for ymvec: {}, expected shape starting with {}".format(
             ymvec.shape, original_shape))
 
     # Extract angular data for this point
     if vza.ndim == 3 and vza.shape[:2] == original_shape:
+        # 3D case: HARP2 format (lat, lon, angles)
         point_vza = vza[row_idx, col_idx, :]
         point_sza = sza[row_idx, col_idx, :]
         point_raa = raa[row_idx, col_idx, :]
@@ -1284,6 +2032,20 @@ def get_channel_intensity_dolp_vza(data_dict, row_idx, col_idx):
         # Check for NaN values
         if np.any(np.isnan(point_vza)) or np.any(np.isnan(point_sza)) or np.any(np.isnan(point_raa)):
             print("Warning: NaN values found in angular data for point [{}, {}]".format(row_idx, col_idx))
+    elif vza.ndim == 3 and len(original_shape) == 1 and vza.shape[0] == original_shape[0]:
+        # 3D case: RSP format (spatial_points, 1, angles)
+        point_vza = vza[row_idx, 0, :]  # squeeze out the middle dimension
+        point_sza = sza[row_idx, 0, :]
+        point_raa = raa[row_idx, 0, :]
+
+        # Validate expected length
+        if len(point_vza) != total_intensity_angles:
+            print("Warning: Expected angular data length {}, got {}".format(
+                total_intensity_angles, len(point_vza)))
+
+        # Check for NaN values
+        if np.any(np.isnan(point_vza)) or np.any(np.isnan(point_sza)) or np.any(np.isnan(point_raa)):
+            print("Warning: NaN values found in angular data for point [{}]".format(row_idx))
     else:
         raise ValueError("Unexpected shape for angular arrays: {}, expected shape starting with {}".format(
             vza.shape, original_shape))
@@ -1803,18 +2565,32 @@ def create_scatter_plot_only(data_dict, selected_property, original_indices, cli
             # Single file mode format
             selected_row = clicked_point_data['row']
             selected_col = clicked_point_data['col']
-            lat = data_dict['latitude'][selected_row, selected_col]
-            lon = data_dict['longitude'][selected_row, selected_col]
 
-            fig.add_trace(
-                go.Scattermap(
-                    lon=[lon], lat=[lat],
-                    mode='markers',
-                    marker=dict(size=10, color='red', symbol='circle'),
-                    showlegend=False,
-                    hoverinfo='skip'
+            # Handle both 1D (RSP) and 2D (HARP2) indexing
+            original_shape = data_dict.get('original_shape', (0,))
+            if len(original_shape) == 1:
+                # 1D data (RSP)
+                lat = data_dict['latitude'][selected_row]
+                lon = data_dict['longitude'][selected_row]
+            elif len(original_shape) == 2:
+                # 2D data (HARP2)
+                lat = data_dict['latitude'][selected_row, selected_col]
+                lon = data_dict['longitude'][selected_row, selected_col]
+            else:
+                # Fallback: try to use lat_flat/lon_flat
+                lat = lat_flat[selected_row] if selected_row < len(lat_flat) else None
+                lon = lon_flat[selected_row] if selected_row < len(lon_flat) else None
+
+            if lat is not None and lon is not None:
+                fig.add_trace(
+                    go.Scattermap(
+                        lon=[lon], lat=[lat],
+                        mode='markers',
+                        marker=dict(size=10, color='red', symbol='circle'),
+                        showlegend=False,
+                        hoverinfo='skip'
+                    )
                 )
-            )
         elif 'lat' in clicked_point_data and 'lon' in clicked_point_data:
             # Multi file mode format
             fig.add_trace(
@@ -1864,7 +2640,7 @@ def create_scatter_plot_only(data_dict, selected_property, original_indices, cli
     return fig
 
 
-def create_combined_intensity_dolp_plot(intensity_data, dolp_data, wavelengths, wl_colors):
+def create_combined_intensity_dolp_plot(intensity_data, dolp_data, wavelengths, wl_colors, file_format='HARP2'):
     """
     Create a single plot with intensity and DoLP as subplots
     with legend between them
@@ -2004,7 +2780,7 @@ def create_combined_intensity_dolp_plot(intensity_data, dolp_data, wavelengths, 
     for wl in wavelengths:
         name = f'{wl} nm'
         # get instrument type for this wl
-        wl_mapping = get_wavelength_instrument_mapping()
+        wl_mapping = get_wavelength_instrument_mapping(file_format)
         instrument = None
         for w, inst, n_vza in wl_mapping:
             if w == wl:
@@ -2058,17 +2834,32 @@ def create_aod_total_plot(data_dict, selected_row, selected_col):
 
                 # Get the data - try 2D version first, then flattened
                 data_array = None
+                orig_shape = data_dict.get('original_shape', (0,))
+
                 if f"{var_name}_2d" in data_dict:
                     # Use 2D version
                     data_array = data_dict[f"{var_name}_2d"]
-                    aod_value = data_array[selected_row, selected_col]
+                    # Handle both 1D (RSP) and 2D (HARP2) indexing
+                    if data_array.ndim == 1:
+                        # 1D data (RSP)
+                        aod_value = data_array[selected_row]
+                    elif data_array.ndim == 2:
+                        # 2D data (HARP2)
+                        aod_value = data_array[selected_row, selected_col]
+                    else:
+                        aod_value = np.nan
                 elif var_name in data_dict:
                     # Use flattened version - need to convert indices
                     data_array = data_dict[var_name]
-                    if 'original_shape' in data_dict:
-                        orig_shape = data_dict['original_shape']
+                    if len(orig_shape) == 1:
+                        # 1D data (RSP)
+                        aod_value = data_array[selected_row]
+                    elif len(orig_shape) == 2:
+                        # 2D data (HARP2)
                         flat_index = selected_row * orig_shape[1] + selected_col
                         aod_value = data_array[flat_index]
+                    else:
+                        aod_value = np.nan
 
                 # Check if value is valid
                 if np.isfinite(aod_value) and aod_value >= 0:  # Valid AOD values should be non-negative
@@ -2176,6 +2967,203 @@ def create_aod_total_plot(data_dict, selected_row, selected_col):
             yaxis_title="Aerosol Optical Depth",
             height=800
         )
+        return fig
+
+
+def create_aod_vs_time_plot(data_dict, title_suffix="", show_modes=False):
+    """
+    Create a plot showing AOD (total or spectral) vs time for airborne data (RSP).
+    Shows all spatial points along the flight path over time.
+
+    Args:
+        data_dict: Dictionary containing data arrays including 'rsp_time' and AOD variables
+        title_suffix: Optional suffix to add to title (e.g., "File 1" for multi-file mode)
+        show_modes: If True, also plot individual mode contributions at reference wavelength
+
+    Returns:
+        fig: Plotly figure object
+    """
+    try:
+        # Check if time data exists
+        if 'rsp_time' not in data_dict:
+            fig = go.Figure()
+            fig.add_annotation(
+                text="Time data (rsp_time) not available in this file",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5,
+                showarrow=False,
+                font=dict(size=16)
+            )
+            fig.update_layout(title="AOD vs Time - No Data Available")
+            return fig
+
+        # Get time data
+        time_data = data_dict['rsp_time']
+        if time_data.ndim > 1:
+            time_data = time_data.flatten()
+
+        # Find all available total AOD wavelengths
+        wavelength_aod_mapping = []
+        for var_name in sorted(data_dict.keys()):
+            if var_name.startswith('optical_depth_total_') and not var_name.endswith('_2d'):
+                try:
+                    wl_str = var_name.split('_')[-1]
+                    wl = float(wl_str)
+                    wavelength_aod_mapping.append((wl, var_name))
+                except ValueError:
+                    continue
+
+        if not wavelength_aod_mapping:
+            fig = go.Figure()
+            fig.add_annotation(
+                text="No total AOD data available",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5,
+                showarrow=False,
+                font=dict(size=16)
+            )
+            fig.update_layout(title="AOD vs Time - No AOD Data")
+            return fig
+
+        # Get reference wavelength BEFORE sorting (first wavelength found in data)
+        #ref_wl = wavelength_aod_mapping[0][0]
+        ref_wl = data_dict.get('reference_wavelength', wavelength_aod_mapping[0][0])
+        ref_wl_int = int(round(ref_wl))
+
+        # Sort by wavelength for display
+        wavelength_aod_mapping.sort(key=lambda x: x[0])
+
+        # Create figure
+        fig = go.Figure()
+
+        # Generate colors for different wavelengths
+        wavelengths = [wl for wl, _ in wavelength_aod_mapping]
+        wl_colors = generate_wavelength_colors(wavelengths)
+
+        # Plot total AOD for each wavelength (only if NOT showing modes)
+        if not show_modes:
+            for wl, var_name in wavelength_aod_mapping:
+                # Get AOD data
+                aod_data = data_dict.get(var_name)
+                if aod_data is None:
+                    continue
+
+                # Flatten if needed
+                if aod_data.ndim > 1:
+                    aod_data = aod_data.flatten()
+
+                # Ensure same length
+                min_len = min(len(time_data), len(aod_data))
+                time_subset = time_data[:min_len]
+                aod_subset = aod_data[:min_len]
+
+                # Filter out invalid values
+                valid_mask = np.isfinite(time_subset) & np.isfinite(aod_subset)
+
+                if not np.any(valid_mask):
+                    continue
+
+                # Add trace
+                fig.add_trace(go.Scatter(
+                    x=time_subset[valid_mask],
+                    y=aod_subset[valid_mask],
+                    mode='lines+markers',
+                    name=f'{int(wl)} nm',
+                    line=dict(color=wl_colors.get(wl, '#000000'), width=2),
+                    marker=dict(size=4)
+                ))
+
+        # Add individual mode traces at reference wavelength if requested
+        if show_modes and wavelength_aod_mapping:
+            # Use the reference wavelength (already calculated above)
+            # Get mode colors
+            mode_colors = get_mode_colors()
+
+            # Define modes to look for
+            modes = ['fine', 'coarse', 'dust', 'sea_salt']
+
+            # Plot each mode at reference wavelength
+            for mode in modes:
+                # Look for variable like optical_depth_fine_556
+                mode_var_name = f'optical_depth_{mode}_{ref_wl_int}'
+
+                if mode_var_name in data_dict:
+                    mode_data = data_dict[mode_var_name]
+
+                    # Flatten if needed
+                    if mode_data.ndim > 1:
+                        mode_data = mode_data.flatten()
+
+                    # Ensure same length
+                    min_len = min(len(time_data), len(mode_data))
+                    time_subset = time_data[:min_len]
+                    mode_subset = mode_data[:min_len]
+
+                    # Filter out invalid values
+                    valid_mask = np.isfinite(time_subset) & np.isfinite(mode_subset)
+
+                    if np.any(valid_mask):
+                        # Add trace with dashed line style to distinguish from total AOD
+                        fig.add_trace(go.Scatter(
+                            x=time_subset[valid_mask],
+                            y=mode_subset[valid_mask],
+                            mode='lines',
+                            name=f'{mode.capitalize()} ({ref_wl_int} nm)',
+                            line=dict(
+                                color=mode_colors.get(mode, '#000000'),
+                                width=2,
+                                dash='dash'
+                            ),
+                            legendgroup='modes',
+                            legendgrouptitle_text=f"Modes at {ref_wl_int} nm"
+                        ))
+
+        # Build title with optional suffix
+        if show_modes:
+            plot_title = f"Mode AOD vs Time at {ref_wl_int} nm (Flight Path)"
+        else:
+            plot_title = "Total AOD vs Time (Flight Path)"
+        if title_suffix:
+            plot_title = f"{plot_title}<br>{title_suffix}"
+
+        # Update layout
+        legend_title = "Aerosol Mode" if show_modes else "Wavelength"
+        fig.update_layout(
+            title=plot_title,
+            xaxis_title="Time (UTC hours)",
+            yaxis_title="Aerosol Optical Depth",
+            height=800,
+            hovermode='x unified',
+            showlegend=True,
+            legend=dict(
+                title=legend_title,
+                yanchor="top",
+                y=0.99,
+                xanchor="right",
+                x=0.99,
+                bgcolor="rgba(255, 255, 255, 0.8)",
+                bordercolor="Black",
+                borderwidth=1
+            )
+        )
+
+        return fig
+
+    except Exception as e:
+        print(f"Error creating AOD vs time plot: {e}")
+        import traceback
+        traceback.print_exc()
+
+        # Return error figure
+        fig = go.Figure()
+        fig.add_annotation(
+            text=f"Error creating AOD vs time plot: {str(e)}",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5,
+            showarrow=False,
+            font=dict(size=14, color='red')
+        )
+        fig.update_layout(title="AOD vs Time - Error")
         return fig
 
 
@@ -2911,10 +3899,18 @@ def create_export_figure(data_dict, selected_property, original_indices,
             row_idx = clicked_point_data['row']
             col_idx = clicked_point_data['col']
         elif isinstance(clicked_point_data, (int, np.integer)):
-            # old format: convert flat idx to spatial coors
+            # old format: convert flat idx to spatial coords
             original_shape = data_dict['original_shape']
-            row_idx = clicked_point_data // original_shape[1]
-            col_idx = clicked_point_data % original_shape[1]
+            if len(original_shape) == 1:
+                # 1D data (RSP)
+                row_idx = clicked_point_data
+                col_idx = 0
+            elif len(original_shape) == 2:
+                # 2D data (HARP2)
+                row_idx = clicked_point_data // original_shape[1]
+                col_idx = clicked_point_data % original_shape[1]
+            else:
+                row_idx = col_idx = None
         else:
             row_idx = col_idx = None
 
@@ -3398,10 +4394,18 @@ def create_simple_kml_content(data_dict, selected_property, original_indices):
 
     # Add points
     for i in range(len(indices_sample)):
-        # Convert flat index back to 2D coordinates for naming
+        # Convert flat index back to coordinates for naming
         flat_idx = indices_sample[i]
-        row = flat_idx // original_shape[1]
-        col = flat_idx % original_shape[1]
+        if len(original_shape) == 1:
+            # 1D data (RSP)
+            row = flat_idx
+            col = 0
+        elif len(original_shape) == 2:
+            # 2D data (HARP2)
+            row = flat_idx // original_shape[1]
+            col = flat_idx % original_shape[1]
+        else:
+            row = col = flat_idx
 
         lat = lat_sample[i]
         lon = lon_sample[i]
@@ -3634,9 +4638,9 @@ def run_app(initial_file_path, directory_path):
                         ),
                     ], id='individual-file-2-container', style={'display': 'none'}),
 
-                    # PLOT TYPE SELECTOR (NEW!)
+                    # PLOT TYPE SELECTOR (NEW)
                     html.Div([
-                        html.Label("Plot Type:", style={
+                        html.Label("Select Plot Type:", style={
                             'fontWeight': 'bold',
                             'marginBottom': '5px',
                             'display': 'block',
@@ -3645,7 +4649,7 @@ def run_app(initial_file_path, directory_path):
                         dcc.Dropdown(
                             id='plot-type-selector',
                             options=[
-                                {'label': 'About', 'value': 'about'},
+                                {'label': 'About the Visualizer', 'value': 'about'},
                                 {'label': 'Scatter + Intensity/DoLP', 'value': 'scatter'},
                                 {'label': 'Polarized Reflectance', 'value': 'polarized'},
                                 {'label': 'Residual Analysis', 'value': 'residual'},
@@ -4018,6 +5022,40 @@ def run_app(initial_file_path, directory_path):
                     html.Div(id='aod-total-panel-properties-table', style={'display': 'none'}),
                 ], id='plot-aod-total', style={'display': 'none'}),
 
+                # AOD vs Time plot container (for airborne/RSP data)
+                html.Div([
+                    # Checkbox to show individual mode contributions
+                    html.Div([
+                        dcc.Checklist(
+                            id='show-modes-checkbox',
+                            options=[{'label': ' Show individual mode contributions at reference wavelength', 'value': 'show'}],
+                            value=[],
+                            style={'marginBottom': '15px', 'textAlign': 'center'}
+                        )
+                    ]),
+
+                    # Container for single or dual plots (controlled by callback)
+                    html.Div([
+                        # Single file plot (default)
+                        html.Div([
+                            dcc.Graph(id='aod-time-plot-single', style={'height': '800px'}),
+                        ], id='aod-time-single-container', style={'display': 'block'}),
+
+                        # Multi-file plots (side-by-side)
+                        html.Div([
+                            html.Div([
+                                dcc.Graph(id='aod-time-plot-1', style={'height': '800px'}),
+                            ], style={'width': 'calc(50% - 20px)', 'display': 'inline-block', 'padding': '0 10px', 'vertical-align': 'top'}),
+                            html.Div([
+                                dcc.Graph(id='aod-time-plot-2', style={'height': '800px'}),
+                            ], style={'width': 'calc(50% - 20px)', 'display': 'inline-block', 'padding': '0 10px', 'vertical-align': 'top'}),
+                        ], id='aod-time-multi-container', style={'display': 'none', 'white-space': 'nowrap'}),
+                    ]),
+
+                    # Warning message when only one file has time data
+                    html.Div(id='aod-time-warning', style={'textAlign': 'center', 'color': '#e67e22', 'marginTop': '10px'}),
+                ], id='plot-aod-time', style={'display': 'none'}),
+
             ], style={
                 'flex': '0 0 74%'
             }),
@@ -4035,6 +5073,49 @@ def run_app(initial_file_path, directory_path):
     # ---------------------------------------------------
     # NEW CALLBACKS FOR DROPDOWN-BASED PLOT SELECTION
     # ---------------------------------------------------
+    # Callback to dynamically update plot type dropdown options based on available data
+    @app.callback(
+        Output('plot-type-selector', 'options'),
+        [Input('file-selector', 'value'),
+         Input('individual-file-selector-2', 'value')]
+    )
+    def update_plot_type_options(file_path_1, file_path_2):
+        """
+        Dynamically update plot type dropdown options based on file type.
+        Shows "AOD vs Time" option only for files with rsp_time data (RSP files).
+        Checks both file selectors for multi-file mode.
+        """
+        # Base options available for all files
+        base_options = [
+            {'label': 'About the Visualizer', 'value': 'about'},
+            {'label': 'Scatter + Intensity/DoLP', 'value': 'scatter'},
+            {'label': 'Polarized Reflectance', 'value': 'polarized'},
+            {'label': 'Residual Analysis', 'value': 'residual'},
+            {'label': 'Histogram', 'value': 'histogram'},
+            {'label': 'AOD Total', 'value': 'aod_total'}
+        ]
+
+        # Check both files for time data (RSP files)
+        has_time_data = False
+        for file_path in [file_path_1, file_path_2]:
+            if file_path:
+                try:
+                    cache_entry = get_cached_data(file_path)
+                    data_dict = cache_entry['data_dict']
+
+                    # If rsp_time exists in either file, add the AOD vs Time option
+                    if 'rsp_time' in data_dict:
+                        has_time_data = True
+                        print(f"Found rsp_time in {os.path.basename(file_path)}")
+                        break
+                except Exception as e:
+                    print(f"Error checking for time data in {file_path}: {e}")
+
+        if has_time_data:
+            base_options.append({'label': 'AOD vs Time', 'value': 'aod_time'})
+
+        return base_options
+
     # Callback to control which plot container is visible
     @app.callback(
         [Output('plot-about', 'style'),
@@ -4042,7 +5123,8 @@ def run_app(initial_file_path, directory_path):
          Output('plot-polarized', 'style'),
          Output('plot-residual', 'style'),
          Output('plot-histogram', 'style'),
-         Output('plot-aod-total', 'style')],
+         Output('plot-aod-total', 'style'),
+         Output('plot-aod-time', 'style')],
         Input('plot-type-selector', 'value')
     )
     def update_plot_visibility(plot_type):
@@ -4054,7 +5136,8 @@ def run_app(initial_file_path, directory_path):
             {'display': 'none'},  # polarized
             {'display': 'none'},  # residual
             {'display': 'none'},  # histogram
-            {'display': 'none'}   # aod_total
+            {'display': 'none'},  # aod_total
+            {'display': 'none'}   # aod_time
         ]
 
         # Show the selected plot
@@ -4064,7 +5147,8 @@ def run_app(initial_file_path, directory_path):
             'polarized': 2,
             'residual': 3,
             'histogram': 4,
-            'aod_total': 5
+            'aod_total': 5,
+            'aod_time': 6
         }
 
         if plot_type in plot_map:
@@ -4215,8 +5299,16 @@ def run_app(initial_file_path, directory_path):
                         # Text format is "idx, value, cost"
                         original_idx = int(text_data.split(',')[0])
                         original_shape_1 = data_dict_1['original_shape']
-                        file1_row = original_idx // original_shape_1[1]
-                        file1_col = original_idx % original_shape_1[1]
+
+                        # Handle both 1D (RSP) and 2D (HARP2) data
+                        if len(original_shape_1) == 1:
+                            # 1D data (RSP): row is the index, col is always 0
+                            file1_row = original_idx
+                            file1_col = 0
+                        else:
+                            # 2D data (HARP2): convert flat index to row/col
+                            file1_row = original_idx // original_shape_1[1]
+                            file1_col = original_idx % original_shape_1[1]
                         print(f"DEBUG: File 1 extracted directly: idx={original_idx}, row={file1_row}, col={file1_col}")
                     except (ValueError, IndexError) as e:
                         print(f"WARNING: Could not parse clicked point index from text; falling back to search: {e}")
@@ -4226,9 +5318,17 @@ def run_app(initial_file_path, directory_path):
                             data_dict_1['longitude'].flatten(),
                             click_lat, click_lon
                         )
-                        original_shape_1 = data_dict['original_shape']
-                        file1_row = file1_closest_idx // original_shape_1[1]
-                        file1_col = file1_closest_idx % original_shape_1[1]
+                        original_shape_1 = data_dict_1['original_shape']
+
+                        # Handle both 1D (RSP) and 2D (HARP2) data
+                        if len(original_shape_1) == 1:
+                            # 1D data (RSP): row is the index, col is always 0
+                            file1_row = file1_closest_idx
+                            file1_col = 0
+                        else:
+                            # 2D data (HARP2): convert flat index to row/col
+                            file1_row = file1_closest_idx // original_shape_1[1]
+                            file1_col = file1_closest_idx % original_shape_1[1]
 
                     # Find file 2 closest point
                     lat_2d = filtered_data_2['latitude']
@@ -4241,8 +5341,16 @@ def run_app(initial_file_path, directory_path):
                         valid_mask = valid_mask & np.isfinite(prop_2d)
 
                     if np.any(valid_mask):
-                        # Get 2d indices of valid points
-                        valid_rows, valid_cols = np.where(valid_mask)
+                        # Get indices of valid points (handle both 1D and 2D)
+                        original_shape_2 = data_dict_2['original_shape']
+                        if len(original_shape_2) == 1:
+                            # 1D data (RSP)
+                            valid_rows, = np.where(valid_mask)
+                            valid_cols = np.zeros_like(valid_rows)
+                        else:
+                            # 2D data (HARP2)
+                            valid_rows, valid_cols = np.where(valid_mask)
+
                         valid_lats = lat_2d[valid_mask]
                         valid_lons = lon_2d[valid_mask]
 
@@ -4253,13 +5361,21 @@ def run_app(initial_file_path, directory_path):
                             click_lat, click_lon
                         )
 
-                        # Map back to original 2d coords
+                        # Map back to original coords
                         file2_row = valid_rows[file2_closest_idx]
                         file2_col = valid_cols[file2_closest_idx]
 
-                        file2_actual_lat = lat_2d[file2_row, file2_col]
-                        file2_actual_lon = lon_2d[file2_row, file2_col]
-                        file2_value = prop_2d[file2_row, file2_col] if prop_2d is not None else 0
+                        # Get actual values (handle both 1D and 2D)
+                        if len(original_shape_2) == 1:
+                            # 1D data (RSP)
+                            file2_actual_lat = lat_2d[file2_row]
+                            file2_actual_lon = lon_2d[file2_row]
+                            file2_value = prop_2d[file2_row] if prop_2d is not None else 0
+                        else:
+                            # 2D data (HARP2)
+                            file2_actual_lat = lat_2d[file2_row, file2_col]
+                            file2_actual_lon = lon_2d[file2_row, file2_col]
+                            file2_value = prop_2d[file2_row, file2_col] if prop_2d is not None else 0
 
                         # Create clicked data for red circles
                         clicked_data_1 = {
@@ -4564,7 +5680,7 @@ def run_app(initial_file_path, directory_path):
 
         # Load the data for the current file
         try:
-            data_dict, _, _, _ = read_hdf5_variables(file_path)
+            data_dict, _, _, _ = load_retrieval_file(file_path)
         except Exception as e:
             fig = go.Figure()
             fig.add_annotation(
@@ -4578,6 +5694,195 @@ def run_app(initial_file_path, directory_path):
 
         # Create the AOD total plot
         return create_aod_total_plot(data_dict, selected_row, selected_col)
+
+    # ---------------------------------------------------
+    # AOD VS TIME CALLBACKS
+    #   -Callbacks to update the AOD vs Time plot (for RSP/airborne data)
+    #   -Supports both single and multi-file comparison modes
+    # ---------------------------------------------------
+    @app.callback(
+        [Output('aod-time-single-container', 'style'),
+         Output('aod-time-multi-container', 'style'),
+         Output('aod-time-plot-single', 'figure'),
+         Output('aod-time-plot-1', 'figure'),
+         Output('aod-time-plot-2', 'figure'),
+         Output('aod-time-warning', 'children')],
+        [Input('file-selector', 'value'),
+         Input('individual-file-selector-2', 'value'),
+         Input('individual-analysis-mode', 'value'),
+         Input('plot-type-selector', 'value'),
+         Input('show-modes-checkbox', 'value')],
+        prevent_initial_call=True
+    )
+    def update_aod_time_plots(file_path_1, file_path_2, analysis_mode, active_tab, show_modes_value):
+        print("Doing callback: update_aod_time_plots")
+        """
+        Callback for AOD vs Time plot for airborne/RSP data.
+        Shows single plot for single-file mode, or dual side-by-side plots for multi-file mode.
+        """
+        # Convert checkbox value to boolean
+        show_modes = 'show' in (show_modes_value or [])
+        empty_fig = go.Figure()
+
+        if active_tab != 'aod_time':
+            # Return empty figures when not on aod_time tab
+            return (
+                {'display': 'block'},  # single container
+                {'display': 'none'},   # multi container
+                empty_fig, empty_fig, empty_fig,  # all plots
+                ""  # no warning
+            )
+
+        # Check analysis mode
+        is_multi_file = analysis_mode == 'multiple'
+
+        if is_multi_file:
+            # Multi-file mode - show side-by-side plots
+            warning_msg = ""
+
+            # Check if both files exist
+            if not file_path_1 or not file_path_2:
+                msg_fig = go.Figure()
+                msg_fig.add_annotation(
+                    text="Please select both files for comparison",
+                    xref="paper", yref="paper",
+                    x=0.5, y=0.5,
+                    showarrow=False,
+                    font=dict(size=16, color="#7f8c8d")
+                )
+                return (
+                    {'display': 'none'},
+                    {'display': 'block'},
+                    empty_fig, msg_fig, empty_fig,
+                    ""
+                )
+
+            # Load both files
+            fig1 = empty_fig
+            fig2 = empty_fig
+            has_time_1 = False
+            has_time_2 = False
+
+            # Load file 1
+            try:
+                cache_entry_1 = get_cached_data(file_path_1)
+                data_dict_1 = cache_entry_1['data_dict']
+                if 'rsp_time' in data_dict_1:
+                    has_time_1 = True
+                    filename1 = os.path.basename(file_path_1)
+                    fig1 = create_aod_vs_time_plot(data_dict_1, title_suffix=f"File 1: {filename1}", show_modes=show_modes)
+                else:
+                    fig1 = go.Figure()
+                    fig1.add_annotation(
+                        text=f"No time data in {os.path.basename(file_path_1)}",
+                        xref="paper", yref="paper",
+                        x=0.5, y=0.5,
+                        showarrow=False,
+                        font=dict(size=14, color="#95a5a6")
+                    )
+            except Exception as e:
+                print(f"Error loading file 1: {e}")
+                fig1 = go.Figure()
+                fig1.add_annotation(
+                    text=f"Error loading File 1: {str(e)}",
+                    xref="paper", yref="paper",
+                    x=0.5, y=0.5,
+                    showarrow=False,
+                    font=dict(size=14, color="red")
+                )
+
+            # Load file 2
+            try:
+                cache_entry_2 = get_cached_data(file_path_2)
+                data_dict_2 = cache_entry_2['data_dict']
+                if 'rsp_time' in data_dict_2:
+                    has_time_2 = True
+                    filename2 = os.path.basename(file_path_2)
+                    fig2 = create_aod_vs_time_plot(data_dict_2, title_suffix=f"File 2: {filename2}", show_modes=show_modes)
+                else:
+                    fig2 = go.Figure()
+                    fig2.add_annotation(
+                        text=f"No time data in {os.path.basename(file_path_2)}",
+                        xref="paper", yref="paper",
+                        x=0.5, y=0.5,
+                        showarrow=False,
+                        font=dict(size=14, color="#95a5a6")
+                    )
+            except Exception as e:
+                print(f"Error loading file 2: {e}")
+                fig2 = go.Figure()
+                fig2.add_annotation(
+                    text=f"Error loading File 2: {str(e)}",
+                    xref="paper", yref="paper",
+                    x=0.5, y=0.5,
+                    showarrow=False,
+                    font=dict(size=14, color="red")
+                )
+
+            # Check if only one file has time data
+            if has_time_1 and not has_time_2:
+                warning_msg = "⚠️ Only File 1 has time data. File 2 does not contain airborne/RSP measurements."
+            elif has_time_2 and not has_time_1:
+                warning_msg = "⚠️ Only File 2 has time data. File 1 does not contain airborne/RSP measurements."
+            elif not has_time_1 and not has_time_2:
+                warning_msg = "⚠️ Neither file contains time data (rsp_time). This plot type requires airborne/RSP data."
+
+            return (
+                {'display': 'none'},   # hide single
+                {'display': 'block'},  # show multi
+                empty_fig,  # single plot (not used)
+                fig1, fig2,  # multi plots
+                warning_msg
+            )
+
+        else:
+            # Single-file mode - show single plot
+            if not file_path_1:
+                msg_fig = go.Figure()
+                msg_fig.add_annotation(
+                    text="Please select a file",
+                    xref="paper", yref="paper",
+                    x=0.5, y=0.5,
+                    showarrow=False,
+                    font=dict(size=16, color="#7f8c8d")
+                )
+                msg_fig.update_layout(title="AOD vs Time")
+                return (
+                    {'display': 'block'},
+                    {'display': 'none'},
+                    msg_fig, empty_fig, empty_fig,
+                    ""
+                )
+
+            # Load the data for the file
+            try:
+                cache_entry = get_cached_data(file_path_1)
+                data_dict = cache_entry['data_dict']
+            except Exception as e:
+                error_fig = go.Figure()
+                error_fig.add_annotation(
+                    text=f"Error loading data: {str(e)}",
+                    xref="paper", yref="paper",
+                    x=0.5, y=0.5,
+                    showarrow=False,
+                    font=dict(size=16, color="red")
+                )
+                error_fig.update_layout(title="AOD vs Time - Error")
+                return (
+                    {'display': 'block'},
+                    {'display': 'none'},
+                    error_fig, empty_fig, empty_fig,
+                    ""
+                )
+
+            # Create the AOD vs time plot
+            single_fig = create_aod_vs_time_plot(data_dict, show_modes=show_modes)
+            return (
+                {'display': 'block'},
+                {'display': 'none'},
+                single_fig, empty_fig, empty_fig,
+                ""
+            )
 
     # ---------------------------------------------------
     # AOD HISTOGRAM CALLBACK (4 of 18 total)
@@ -4629,7 +5934,7 @@ def run_app(initial_file_path, directory_path):
 
         try:
             # Read data from current file path
-            data_dict, sorted_variables, display_names, variable_metadata = read_hdf5_variables(file_path)
+            data_dict, sorted_variables, display_names, variable_metadata = load_retrieval_file(file_path)
 
             # Use 200 as a default max cost if not given
             if max_cost is None:
@@ -4746,7 +6051,7 @@ def run_app(initial_file_path, directory_path):
                     raise ValueError("No file selected")
 
                 # Load data for file 1
-                data_dict, _, _, _ = read_hdf5_variables(file_path_1)
+                data_dict, _, _, _ = load_retrieval_file(file_path_1)
                 intensity_data, dolp_data, wavelengths = get_channel_intensity_dolp_vza(
                     data_dict, selected_row, selected_col
                 )
@@ -4776,8 +6081,8 @@ def run_app(initial_file_path, directory_path):
                     return fig
 
                 # Load data for both files
-                data_dict_1, _, _, _ = read_hdf5_variables(file_path_1)
-                data_dict_2, _, _, _ = read_hdf5_variables(file_path_2)
+                data_dict_1, _, _, _ = load_retrieval_file(file_path_1)
+                data_dict_2, _, _, _ = load_retrieval_file(file_path_2)
 
                 # Get data for the same point from both files
                 intensity_data_1, dolp_data_1, wavelengths_1 = get_channel_intensity_dolp_vza(
@@ -4917,7 +6222,7 @@ def run_app(initial_file_path, directory_path):
 
         # Load the data for the current file
         try:
-            data_dict, _, _, _ = read_hdf5_variables(file_path)
+            data_dict, _, _, _ = load_retrieval_file(file_path)
         except Exception as e:
             fig = go.Figure()
             fig.add_annotation(
@@ -5000,7 +6305,7 @@ def run_app(initial_file_path, directory_path):
         # Read new file
         try:
             print(f"selected_file_path = {selected_file_path}")
-            new_data_dict, new_sorted_variables, new_display_names, new_variable_metadata = read_hdf5_variables(selected_file_path)
+            new_data_dict, new_sorted_variables, new_display_names, new_variable_metadata = load_retrieval_file(selected_file_path)
 
             # Get new max cost value
             new_max_cost_value = np.nanmax(new_data_dict['cost_function'])
@@ -5137,7 +6442,7 @@ def run_app(initial_file_path, directory_path):
             if idx is not None and file_path is not None:
                 try:
                     # Read data for current file
-                    data_dict, _, _, _ = read_hdf5_variables(file_path)
+                    data_dict, _, _, _ = load_retrieval_file(file_path)
 
                     # Filter by current cost value
                     max_cost = current_file_data.get('max_cost_value')
@@ -5233,8 +6538,19 @@ def run_app(initial_file_path, directory_path):
                     valid_original_indices = np.arange(len(valid_mask))[valid_mask]
                     valid_indices = np.where(valid_mask)[0]
                     original_flat_idx = valid_indices[nearest_valid_idx]
-                    selected_row = original_flat_idx // original_shape[1]
-                    selected_col = original_flat_idx % original_shape[1]
+
+                    # Handle both 1D (RSP) and 2D (HARP2) data
+                    if len(original_shape) == 1:
+                        # 1D data (RSP)
+                        selected_row = original_flat_idx
+                        selected_col = 0
+                    elif len(original_shape) == 2:
+                        # 2D data (HARP2)
+                        selected_row = original_flat_idx // original_shape[1]
+                        selected_col = original_flat_idx % original_shape[1]
+                    else:
+                        raise ValueError(f"Unexpected original_shape dimensionality: {len(original_shape)}D")
+
                     selected_point_idx = valid_original_indices[nearest_valid_idx]
                     clicked_point_data = {'row': selected_row, 'col': selected_col, 'original_idx': int(selected_point_idx)}
             except Exception as e:
@@ -5254,12 +6570,25 @@ def run_app(initial_file_path, directory_path):
 
                 pointNumber = point_data.get('pointNumber', 0)
                 clicked_original_flat_idx = valid_original_indices[pointNumber]
-                selected_row = clicked_original_flat_idx // original_shape[1]
-                selected_col = clicked_original_flat_idx % original_shape[1]
+
+                # Handle both 1D (RSP) and 2D (HARP2) data
+                if len(original_shape) == 1:
+                    # 1D data (RSP): row is the index, col is always 0
+                    selected_row = clicked_original_flat_idx
+                    selected_col = 0
+                elif len(original_shape) == 2:
+                    # 2D data (HARP2): convert flat index to row/col
+                    selected_row = clicked_original_flat_idx // original_shape[1]
+                    selected_col = clicked_original_flat_idx % original_shape[1]
+                else:
+                    raise ValueError(f"Unexpected original_shape dimensionality: {len(original_shape)}D")
+
                 selected_point_idx = valid_original_indices[pointNumber]
                 clicked_point_data = {'row': selected_row, 'col': selected_col, 'original_idx': int(selected_point_idx)}
             except Exception as e:
                 print(f"Error processing click: {e}")
+                import traceback
+                traceback.print_exc()
                 clicked_point_data = stored_point_data
         else:
             clicked_point_data = stored_point_data
@@ -5306,8 +6635,9 @@ def run_app(initial_file_path, directory_path):
                 wl_colors = generate_wavelength_colors(wavelengths)
 
                 # Create combined plot with subplots
+                file_format = data_dict.get('file_format', 'HARP2')
                 combined_fig = create_combined_intensity_dolp_plot(
-                    intensity_data, dolp_data, wavelengths, wl_colors
+                    intensity_data, dolp_data, wavelengths, wl_colors, file_format
                 )
 
             except Exception as e:
@@ -5321,34 +6651,81 @@ def run_app(initial_file_path, directory_path):
         if clicked_point_data is not None and 'row' in clicked_point_data:
             selected_row = clicked_point_data['row']
             selected_col = clicked_point_data['col']
-            lat = data_dict['latitude'][selected_row, selected_col]
-            lon = data_dict['longitude'][selected_row, selected_col]
-            sza = data_dict['sza'][selected_row, selected_col]
-            raa = data_dict['raa'][selected_row, selected_col]
 
-            if filtered_data[selected_property].ndim == 2:
-                val = filtered_data[selected_property][selected_row, selected_col]
+            # Handle both 1D (RSP) and 2D (HARP2) indexing
+            if len(original_shape) == 1:
+                # 1D data (RSP): use selected_row as index
+                lat = data_dict['latitude'][selected_row]
+                lon = data_dict['longitude'][selected_row]
+                sza = data_dict['sza'][selected_row]
+                raa = data_dict['raa'][selected_row]
+                val = filtered_data[selected_property][selected_row]
+                cost = data_dict['cost_function'][selected_row]
+            elif len(original_shape) == 2:
+                # 2D data (HARP2): use [row, col] indexing or flatten
+                if filtered_data[selected_property].ndim == 2:
+                    lat = data_dict['latitude'][selected_row, selected_col]
+                    lon = data_dict['longitude'][selected_row, selected_col]
+                    sza = data_dict['sza'][selected_row, selected_col]
+                    raa = data_dict['raa'][selected_row, selected_col]
+                    val = filtered_data[selected_property][selected_row, selected_col]
+                    cost = data_dict['cost_function'][selected_row, selected_col]
+                else:
+                    flat_idx = selected_row * original_shape[1] + selected_col
+                    lat = data_dict['latitude'].flatten()[flat_idx]
+                    lon = data_dict['longitude'].flatten()[flat_idx]
+                    sza = data_dict['sza'].flatten()[flat_idx]
+                    raa = data_dict['raa'].flatten()[flat_idx]
+                    val = data_dict[selected_property][flat_idx]
+                    cost = data_dict['cost_function'][flat_idx]
             else:
-                flat_idx = selected_row * original_shape[1] + selected_col
-                val = data_dict[selected_property][flat_idx]
+                raise ValueError(f"Unexpected original_shape dimensionality: {len(original_shape)}D")
 
-            if filtered_data['cost_function'].ndim == 2:
-                cost = data_dict['cost_function'][selected_row, selected_col]
-            else:
-                flat_idx = selected_row * original_shape[1] + selected_col
-                cost = data_dict['cost_function'][flat_idx]
+            # Extract scalar values for sza and raa (handle multi-dimensional arrays)
+            try:
+                # For sza: extract first element if it's an array
+                if hasattr(sza, '__len__') and not isinstance(sza, str):
+                    sza_scalar = sza.flat[0] if hasattr(sza, 'flat') else sza[0]
+                else:
+                    sza_scalar = sza
+                sza_deg = np.degrees(np.arccos(sza_scalar))
+            except:
+                sza_deg = None
 
-            click_info = html.Div([
+            try:
+                # For raa: extract first element if it's an array
+                if hasattr(raa, '__len__') and not isinstance(raa, str):
+                    raa_scalar = raa.flat[0] if hasattr(raa, 'flat') else raa[0]
+                else:
+                    raa_scalar = raa
+            except:
+                raa_scalar = None
+
+            # Build click info with conditional formatting
+            click_info_parts = [
                 html.Strong("Location: "), f"Lat {lat:.4f}°, Lon {lon:.4f}°",
-                html.Br(),
-                html.Strong("SZA: "), f"{np.degrees(np.arccos(sza[0])):.3f}°",
-                html.Br(),
-                html.Strong("RAA: "), f"{raa[0]:.3f}°",
-                html.Br(),
+                html.Br()
+            ]
+
+            if sza_deg is not None and np.isfinite(sza_deg):
+                click_info_parts.extend([
+                    html.Strong("SZA: "), f"{sza_deg:.3f}°",
+                    html.Br()
+                ])
+
+            if raa_scalar is not None and np.isfinite(raa_scalar):
+                click_info_parts.extend([
+                    html.Strong("RAA: "), f"{raa_scalar:.3f}°",
+                    html.Br()
+                ])
+
+            click_info_parts.extend([
                 html.Strong("Selected: "), f"{selected_property} = {val:.3f}",
                 html.Br(),
                 html.Strong("Cost: "), f"{cost:.3f}"
             ])
+
+            click_info = html.Div(click_info_parts)
 
             # properties_table = create_properties_table(filtered_data, selected_row, selected_col)
             properties_table = create_properties_table(filtered_data, selected_row, selected_col, selected_property)
@@ -5398,7 +6775,7 @@ def run_app(initial_file_path, directory_path):
 
             # Read data from current file
             data_dict, sorted_variables, display_names, variable_metadata = \
-                read_hdf5_variables(file_path)
+                load_retrieval_file(file_path)
 
             # Filter data and get indices
             filtered_data, original_indices = filter_by_cost(data_dict, max_cost)
@@ -5456,7 +6833,7 @@ def run_app(initial_file_path, directory_path):
 
             # Read data from current file
             data_dict, sorted_variables, display_names, variable_metadata = \
-                read_hdf5_variables(file_path)
+                load_retrieval_file(file_path)
 
             # Filter data and get indices
             filtered_data, original_indices = filter_by_cost(data_dict, max_cost)

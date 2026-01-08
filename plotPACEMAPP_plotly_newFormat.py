@@ -59,7 +59,7 @@ def clear_data_cache():
 
 def scan_directory_for_files(directory_path):
     """
-    Scan specified directory for specified .h5 and .nc files.
+    Scan specified directory for specified .h5 and .nc files
 
     Args:
         directory_path: (str) path to directory containing retrieval files
@@ -110,7 +110,10 @@ def find_nearest_point(lats, lons, target_lat, target_lon):
 
 def determine_retrieval_scenario(file_path):
     """
-    Determine which instruments were used in the retrieval.
+    **NOTE**: This is currently not being used (or only by the export function).
+    Likely this and the export function should be updated
+
+    Determine which instruments were used in the retrieval
 
     Args:
         file_path: full path to the retrieval file
@@ -1164,6 +1167,10 @@ def read_hdf5_variables(file_path):
             if 'wavelength' in f:
                 wavelengths = f['wavelength'][:]
                 data_dict['wavelengths'] = wavelengths
+                # Set reference wavelength for AOD visualization (first wavelength)
+                data_dict['reference_wavelength'] = float(wavelengths[0])
+                if debug > 1:
+                    print(f"HARP2 AOD reference wavelength: {wavelengths[0]} nm")
 
             # Get output channels information
             data_dict['output_channels'] = wavelengths
@@ -1513,9 +1520,9 @@ def read_rsp_hdf5_variables(file_path):
 
                 # Skip variables we already processed
                 if key in ['lat', 'lon', 'sensor_zenith', 'raa', 'sza', 'ymvec', 'fvec',
-                           'retrieval_normalized_cost_function_data',
-                           'retrieval_normalized_cost_function_total',
-                           'output_channels', 'rsp_time']:
+                          'retrieval_normalized_cost_function_data',
+                          'retrieval_normalized_cost_function_total',
+                          'output_channels', 'rsp_time']:
                     continue
 
                 # Skip excluded variables
@@ -1587,6 +1594,8 @@ def read_rsp_hdf5_variables(file_path):
                 base_var_name = multi_wl_key[:-9]  # Remove '_multi_wl'
 
                 # Look for corresponding wavelength array
+                # For RSP: wavelength arrays are named like aerosol_optical_depth_wavelengths
+                # (without the mode suffix like _fine, _dust)
                 # Extract base property name (e.g., optical_depth from optical_depth_fine)
                 parts = base_var_name.split('_')
                 if len(parts) >= 2:
@@ -1789,12 +1798,12 @@ def read_rsp_hdf5_variables(file_path):
             # Store file format for later use
             data_dict['file_format'] = 'RSP'
 
-            # Get reference wavelength
+            # Set reference wavelength for AOD visualization (first wavelength in AOD wavelength array)
             if 'aerosol_optical_depth_wavelengths' in f:
                 ref_wl = f['aerosol_optical_depth_wavelengths'][:]
-                data_dict['reference_wavelength'] = ref_wl[0]
+                data_dict['reference_wavelength'] = float(ref_wl[0])
                 if debug > 1:
-                    print(f"RSP AOD reference wavelength: {ref_wl[0]}")
+                    print(f"RSP AOD reference wavelength: {ref_wl[0]} nm")
 
             if debug > 0:
                 print(f"RSP reader: Loaded {len(available_variables)} variables")
@@ -2970,7 +2979,7 @@ def create_aod_total_plot(data_dict, selected_row, selected_col):
         return fig
 
 
-def create_aod_vs_time_plot(data_dict, title_suffix="", show_modes=False):
+def create_aod_vs_time_plot(data_dict, title_suffix="", show_modes=False, max_cost=None):
     """
     Create a plot showing AOD (total or spectral) vs time for airborne data (RSP).
     Shows all spatial points along the flight path over time.
@@ -2979,6 +2988,7 @@ def create_aod_vs_time_plot(data_dict, title_suffix="", show_modes=False):
         data_dict: Dictionary containing data arrays including 'rsp_time' and AOD variables
         title_suffix: Optional suffix to add to title (e.g., "File 1" for multi-file mode)
         show_modes: If True, also plot individual mode contributions at reference wavelength
+        max_cost: Maximum cost threshold for filtering (points above threshold are excluded)
 
     Returns:
         fig: Plotly figure object
@@ -3001,6 +3011,15 @@ def create_aod_vs_time_plot(data_dict, title_suffix="", show_modes=False):
         time_data = data_dict['rsp_time']
         if time_data.ndim > 1:
             time_data = time_data.flatten()
+
+        # Get cost function data for filtering
+        cost_mask = None
+        if max_cost is not None and 'cost_function' in data_dict:
+            cost_data = data_dict['cost_function']
+            if cost_data.ndim > 1:
+                cost_data = cost_data.flatten()
+            # Create mask: True for points that PASS the filter (cost <= threshold)
+            cost_mask = cost_data <= max_cost
 
         # Find all available total AOD wavelengths
         wavelength_aod_mapping = []
@@ -3025,9 +3044,8 @@ def create_aod_vs_time_plot(data_dict, title_suffix="", show_modes=False):
             fig.update_layout(title="AOD vs Time - No AOD Data")
             return fig
 
-        # Get reference wavelength BEFORE sorting (first wavelength found in data)
-        #ref_wl = wavelength_aod_mapping[0][0]
-        ref_wl = data_dict.get('reference_wavelength', wavelength_aod_mapping[0][0])
+        # Get reference wavelength from data_dict (set during file reading)
+        ref_wl = data_dict['reference_wavelength']
         ref_wl_int = int(round(ref_wl))
 
         # Sort by wavelength for display
@@ -3039,6 +3057,9 @@ def create_aod_vs_time_plot(data_dict, title_suffix="", show_modes=False):
         # Generate colors for different wavelengths
         wavelengths = [wl for wl, _ in wavelength_aod_mapping]
         wl_colors = generate_wavelength_colors(wavelengths)
+
+        # Track if any data passes the filter
+        any_valid_data = False
 
         # Plot total AOD for each wavelength (only if NOT showing modes)
         if not show_modes:
@@ -3054,23 +3075,32 @@ def create_aod_vs_time_plot(data_dict, title_suffix="", show_modes=False):
 
                 # Ensure same length
                 min_len = min(len(time_data), len(aod_data))
-                time_subset = time_data[:min_len]
-                aod_subset = aod_data[:min_len]
+                time_subset = time_data[:min_len].copy()
+                aod_subset = aod_data[:min_len].copy()
 
-                # Filter out invalid values
+                # Apply cost filter by setting filtered points to NaN
+                if cost_mask is not None:
+                    cost_subset = cost_mask[:min_len]
+                    # Set points that FAIL the cost filter to NaN
+                    aod_subset[~cost_subset] = np.nan
+
+                # Check if we have any valid data
                 valid_mask = np.isfinite(time_subset) & np.isfinite(aod_subset)
-
                 if not np.any(valid_mask):
                     continue
 
-                # Add trace
+                any_valid_data = True
+
+                # Add trace with connectgaps=False to show gaps where data was filtered
                 fig.add_trace(go.Scatter(
-                    x=time_subset[valid_mask],
-                    y=aod_subset[valid_mask],
+                    x=time_subset,
+                    y=aod_subset,
                     mode='lines+markers',
                     name=f'{int(wl)} nm',
                     line=dict(color=wl_colors.get(wl, '#000000'), width=2),
-                    marker=dict(size=4)
+                    marker=dict(size=8),
+                    connectgaps=False,  # Don't connect across filtered points
+                    hovertemplate='<b>Time:</b> %{x:.2f} UTC<br><b>AOD:</b> %{y:.5f}<extra></extra>'
                 ))
 
         # Add individual mode traces at reference wavelength if requested
@@ -3096,27 +3126,69 @@ def create_aod_vs_time_plot(data_dict, title_suffix="", show_modes=False):
 
                     # Ensure same length
                     min_len = min(len(time_data), len(mode_data))
-                    time_subset = time_data[:min_len]
-                    mode_subset = mode_data[:min_len]
+                    time_subset = time_data[:min_len].copy()
+                    mode_subset = mode_data[:min_len].copy()
 
-                    # Filter out invalid values
+                    # Apply cost filter by setting filtered points to NaN
+                    if cost_mask is not None:
+                        cost_subset = cost_mask[:min_len]
+                        # Set points that FAIL the cost filter to NaN
+                        mode_subset[~cost_subset] = np.nan
+
+                    # Check if we have any valid data
                     valid_mask = np.isfinite(time_subset) & np.isfinite(mode_subset)
-
                     if np.any(valid_mask):
+                        any_valid_data = True
+
                         # Add trace with dashed line style to distinguish from total AOD
                         fig.add_trace(go.Scatter(
-                            x=time_subset[valid_mask],
-                            y=mode_subset[valid_mask],
-                            mode='lines',
+                            x=time_subset,
+                            y=mode_subset,
+                            mode='lines+markers',
                             name=f'{mode.capitalize()} ({ref_wl_int} nm)',
                             line=dict(
                                 color=mode_colors.get(mode, '#000000'),
                                 width=2,
                                 dash='dash'
                             ),
+                            marker=dict(size=8),
                             legendgroup='modes',
-                            legendgrouptitle_text=f"Modes at {ref_wl_int} nm"
+                            legendgrouptitle_text=f"Modes at {ref_wl_int} nm",
+                            connectgaps=False,  # Don't connect across filtered points
+                            hovertemplate='<b>Time:</b> %{x:.2f} UTC<br><b>AOD:</b> %{y:.5f}<extra></extra>'
                         ))
+
+        # Check if no data passed the filter and show helpful message
+        if not any_valid_data and cost_mask is not None:
+            # Calculate minimum cost in the data to help user
+            min_cost = None
+            if 'cost_function' in data_dict:
+                cost_data = data_dict['cost_function']
+                if cost_data.ndim > 1:
+                    cost_data = cost_data.flatten()
+                valid_costs = cost_data[np.isfinite(cost_data)]
+                if len(valid_costs) > 0:
+                    min_cost = np.min(valid_costs)
+
+            # Show informative message
+            fig.add_annotation(
+                text=f"No data passes current cost filter (threshold: {max_cost:.3f})",
+                xref="paper", yref="paper",
+                x=0.5, y=0.6,
+                showarrow=False,
+                font=dict(size=16, color="#e74c3c"),
+                xanchor='center'
+            )
+
+            if min_cost is not None:
+                fig.add_annotation(
+                    text=f"Minimum cost in this file: {min_cost:.3f}<br>Try increasing the cost threshold to at least {min_cost:.3f}",
+                    xref="paper", yref="paper",
+                    x=0.5, y=0.4,
+                    showarrow=False,
+                    font=dict(size=14, color="#7f8c8d"),
+                    xanchor='center'
+                )
 
         # Build title with optional suffix
         if show_modes:
@@ -3132,6 +3204,10 @@ def create_aod_vs_time_plot(data_dict, title_suffix="", show_modes=False):
             title=plot_title,
             xaxis_title="Time (UTC hours)",
             yaxis_title="Aerosol Optical Depth",
+            yaxis=dict(
+                exponentformat='none',  # Disable SI prefixes (μ, m, k, etc.)
+                tickformat='.5f'        # Show 5 decimal places in standard notation
+            ),
             height=800,
             hovermode='x unified',
             showlegend=True,
@@ -4649,7 +4725,7 @@ def run_app(initial_file_path, directory_path):
                         dcc.Dropdown(
                             id='plot-type-selector',
                             options=[
-                                {'label': 'About the Visualizer', 'value': 'about'},
+                                {'label': 'About', 'value': 'about'},
                                 {'label': 'Scatter + Intensity/DoLP', 'value': 'scatter'},
                                 {'label': 'Polarized Reflectance', 'value': 'polarized'},
                                 {'label': 'Residual Analysis', 'value': 'residual'},
@@ -4736,26 +4812,32 @@ def run_app(initial_file_path, directory_path):
                                       'fontSize': '16px'
                                     }),
                         html.Div([
+                            html.Button('-', id='cost-decrement-button', n_clicks=0,
+                                        style={'width': '8%', 'padding': '8px', 'backgroundColor': '#95a5a6',
+                                               'color': 'white', 'border': 'none', 'borderRadius': '4px',
+                                               'cursor': 'pointer', 'marginRight': '2%', 'fontWeight': 'bold'}),
                             dcc.Input(
                                 id='cost-input',
-                                type='number',
-                                min=0,
-                                max=1,
+                                type='text',
                                 value=None,
                                 placeholder="Select file first.",
-                                step=0.1,
                                 style={
-                                    'width': '65%',
+                                    'width': '45%',
                                     'height': '24px',
                                     'fontSize': '12px',
-                                    'marginRight': '5%'
+                                    'marginRight': '2%',
+                                    'textAlign': 'center'
                                 }
                             ),
+                            html.Button('+', id='cost-increment-button', n_clicks=0,
+                                        style={'width': '8%', 'padding': '8px', 'backgroundColor': '#95a5a6',
+                                               'color': 'white', 'border': 'none', 'borderRadius': '4px',
+                                               'cursor': 'pointer', 'marginRight': '5%', 'fontWeight': 'bold'}),
                             html.Button('Apply', id='apply-cost-button', n_clicks=0,
                                         style={'width': '30%', 'padding': '8px', 'backgroundColor': '#27ae60',
                                                'color': 'white', 'border': 'none', 'borderRadius': '4px',
                                                'cursor': 'pointer'}),
-                        ], style={'display': 'flex', 'marginBottom': '30px'}),
+                        ], style={'display': 'flex', 'marginBottom': '30px', 'alignItems': 'center'}),
                         html.Div(id='cost-input-message', style={'fontSize': '12px', 'color': '#7f8c8d'}),
                     ]),
 
@@ -5087,7 +5169,7 @@ def run_app(initial_file_path, directory_path):
         """
         # Base options available for all files
         base_options = [
-            {'label': 'About the Visualizer', 'value': 'about'},
+            {'label': 'About', 'value': 'about'},
             {'label': 'Scatter + Intensity/DoLP', 'value': 'scatter'},
             {'label': 'Polarized Reflectance', 'value': 'polarized'},
             {'label': 'Residual Analysis', 'value': 'residual'},
@@ -5711,10 +5793,11 @@ def run_app(initial_file_path, directory_path):
          Input('individual-file-selector-2', 'value'),
          Input('individual-analysis-mode', 'value'),
          Input('plot-type-selector', 'value'),
-         Input('show-modes-checkbox', 'value')],
+         Input('show-modes-checkbox', 'value'),
+         Input('applied-cost-value', 'data')],
         prevent_initial_call=True
     )
-    def update_aod_time_plots(file_path_1, file_path_2, analysis_mode, active_tab, show_modes_value):
+    def update_aod_time_plots(file_path_1, file_path_2, analysis_mode, active_tab, show_modes_value, max_cost):
         print("Doing callback: update_aod_time_plots")
         """
         Callback for AOD vs Time plot for airborne/RSP data.
@@ -5770,7 +5853,7 @@ def run_app(initial_file_path, directory_path):
                 if 'rsp_time' in data_dict_1:
                     has_time_1 = True
                     filename1 = os.path.basename(file_path_1)
-                    fig1 = create_aod_vs_time_plot(data_dict_1, title_suffix=f"File 1: {filename1}", show_modes=show_modes)
+                    fig1 = create_aod_vs_time_plot(data_dict_1, title_suffix=f"File 1: {filename1}", show_modes=show_modes, max_cost=max_cost)
                 else:
                     fig1 = go.Figure()
                     fig1.add_annotation(
@@ -5798,7 +5881,7 @@ def run_app(initial_file_path, directory_path):
                 if 'rsp_time' in data_dict_2:
                     has_time_2 = True
                     filename2 = os.path.basename(file_path_2)
-                    fig2 = create_aod_vs_time_plot(data_dict_2, title_suffix=f"File 2: {filename2}", show_modes=show_modes)
+                    fig2 = create_aod_vs_time_plot(data_dict_2, title_suffix=f"File 2: {filename2}", show_modes=show_modes, max_cost=max_cost)
                 else:
                     fig2 = go.Figure()
                     fig2.add_annotation(
@@ -5876,7 +5959,7 @@ def run_app(initial_file_path, directory_path):
                 )
 
             # Create the AOD vs time plot
-            single_fig = create_aod_vs_time_plot(data_dict, show_modes=show_modes)
+            single_fig = create_aod_vs_time_plot(data_dict, show_modes=show_modes, max_cost=max_cost)
             return (
                 {'display': 'block'},
                 {'display': 'none'},
@@ -6362,6 +6445,52 @@ def run_app(initial_file_path, directory_path):
             raise dash.exceptions.PreventUpdate
 
     # ---------------------------------------------------
+    # COST INCREMENT/DECREMENT CALLBACK
+    # ---------------------------------------------------
+    @app.callback(
+        Output('cost-input', 'value', allow_duplicate=True),
+        [Input('cost-increment-button', 'n_clicks'),
+         Input('cost-decrement-button', 'n_clicks')],
+        [State('cost-input', 'value'),
+         State('current-file-data', 'data')],
+        prevent_initial_call=True
+    )
+    def increment_decrement_cost(inc_clicks, dec_clicks, current_value, current_file_data):
+        """Handle +/- buttons for cost input with 0.01 step"""
+        from dash import callback_context
+
+        if not callback_context.triggered:
+            return no_update
+
+        # Get which button was clicked
+        button_id = callback_context.triggered[0]['prop_id'].split('.')[0]
+
+        # Get max cost from current file
+        max_cost_value = 200.0
+        if current_file_data is not None:
+            max_cost_value = current_file_data.get('max_cost_value', 10.0)
+
+        # Get current value or default
+        if current_value is None:
+            current_value = min(default_cost, max_cost_value)
+
+        # Increment or decrement by 0.01
+        if button_id == 'cost-increment-button':
+            new_value = current_value + 0.01
+        elif button_id == 'cost-decrement-button':
+            new_value = current_value - 0.01
+        else:
+            return no_update
+
+        # Round to avoid floating point precision issues
+        new_value = round(new_value, 3)
+
+        # Clamp to valid range
+        new_value = max(0, min(new_value, max_cost_value))
+
+        return new_value
+
+    # ---------------------------------------------------
     # COST FUNCTION FILTER CALLBACK (13 of 18 total)
     # ---------------------------------------------------
     @app.callback(
@@ -6393,21 +6522,28 @@ def run_app(initial_file_path, directory_path):
         if debug > 1:
             print("Max cost value:", max_cost_value)
 
-        if input_value is None:
-            # return max_cost_value, "Using maximum cost value"
-            return min(default_cost, max_cost_value), f"Using default cost value ({default_cost})"
+        # Handle text input - convert to float
+        if input_value is None or input_value == "":
+            default_val = min(default_cost, max_cost_value)
+            return default_val, f"Using default cost value ({default_cost})", default_val
+
+        # Try to parse the input as a number
+        try:
+            if isinstance(input_value, str):
+                input_value = float(input_value)
+        except (ValueError, TypeError):
+            default_val = min(default_cost, max_cost_value)
+            return default_val, f"Invalid input. Using default cost value ({default_cost})", default_val
 
         # Ensure cost val is within bounds
         if input_value < 0:
-            # return 0, "Input was less than 0. Using minimum value (0)."
             return 0, "Input was less than 0. Using minimum value (0).", 0
 
         if input_value > max_cost_value:
-            # return max_cost_value, f"Input exceeded maximum. Using maximum value ({max_cost_value:.2f})."
             return max_cost_value, f"Input exceeded maximum. Using maximum value ({max_cost_value:.2f}).", max_cost_value
 
-        # return input_value, f"Using cost threshold: {input_value:.2f}"
-        return input_value, f"Using cost threshold: {input_value:.2f}", input_value
+        # Valid input - use it
+        return input_value, f"Using cost threshold: {input_value:.3f}", input_value
 
     # 3. UI SYNCHRONIZATION CALLBACKS
     # ---------------------------------------------------

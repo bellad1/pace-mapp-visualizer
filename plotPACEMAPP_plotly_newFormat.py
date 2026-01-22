@@ -284,7 +284,7 @@ def get_available_modes(filtered_data):
         if any(key in filtered_data for key in test_keys):
             available_modes.append(mode)
 
-    return available_modes if available_modes else ['fine', 'coarse', 'dust']  # fallback
+    return available_modes if available_modes else ['fine', 'coarse', 'dust']
 
 
 def get_mode_colors():
@@ -300,195 +300,6 @@ def get_mode_colors():
         'dust': '#f39c12',      # Orange
         'sea_salt': '#2ecc71'   # Green
     }
-
-
-def create_properties_table(filtered_data, selected_row, selected_col, selected_property):
-    """
-    Create a table showing aerosol properties (by mode)
-    Dynamically detects reference wavelength and available modes.
-    """
-    # Get reference wavelength and available modes dynamically
-    ref_wl = get_reference_wavelength(filtered_data)
-    modes = get_available_modes(filtered_data)
-    mode_colors = get_mode_colors()
-
-    # Define the properties and their display names
-    properties_config = [
-        ('optical_depth', 'Optical Depth', ref_wl),
-        ('ssa', 'Single Scattering Albedo', ref_wl),
-        ('real', 'Real Refractive Index', ref_wl),
-        ('imag', 'Imaginary Refractive Index', ref_wl),
-        ('asymmetry', 'Asymmetry Parameter', ref_wl),
-        # ('absorption_coefficient', 'Absorption Coefficient', ref_wl),
-        ('cross_section', 'Cross Section', ref_wl),
-        # ('extinction_coefficient', 'Extinction Coefficient', ref_wl),
-        ('number_concentration', 'Number Concentration', ref_wl),
-        # ('scattering_coefficient', 'Scattering Coefficient', ref_wl),
-        ('reff', 'Effective Radius', ''),
-        ('veff', 'Effective Variance', ''),
-    ]
-    selected_prop = selected_property
-
-    # Create table header with updated property column title
-    header = html.Tr([
-        html.Th(f"Property (* {ref_wl} nm)", style={'textAlign': 'left', 'padding': '8px', 'borderBottom': '2px solid #34495e'}),
-        *[html.Th(mode.title(),
-                  style={'textAlign': 'center', 'padding': '8px', 'borderBottom': '2px solid #34495e',
-                         'color': mode_colors.get(mode, '#95a5a6'), 'fontWeight': 'bold'})
-          for mode in modes]
-    ])
-
-    # Create table rows
-    table_rows = [header]
-
-    for prop_base, prop_display, wavelength in properties_config:
-        # Build the property keys for each mode
-        mode_values = {}
-
-        for mode in modes:
-            if wavelength:
-                prop_key = f"{prop_base}_{mode}_{wavelength}"
-            else:
-                prop_key = f"{prop_base}_{mode}"
-
-            if prop_key in filtered_data:
-                try:
-                    # Handle both 1D (RSP) and 2D (HARP2) indexing
-                    prop_data = filtered_data[prop_key]
-                    if prop_data.ndim == 1:
-                        # 1D data (RSP): use selected_row as index
-                        value = prop_data[selected_row]
-                    elif prop_data.ndim == 2:
-                        # 2D data (HARP2): use [row, col] indexing
-                        value = prop_data[selected_row, selected_col]
-                    else:
-                        value = np.nan
-
-                    if np.isfinite(value):
-                        mode_values[mode] = f"{value:.3f}"
-                    else:
-                        mode_values[mode] = "N/A"
-                except:
-                    mode_values[mode] = "N/A"
-            else:
-                mode_values[mode] = "-"
-
-        # Create row if at least one mode has data
-        if any(val not in ["-", "N/A"] for val in mode_values.values()):
-            # Use * for reference wavelength properties, show wavelength for others
-            if wavelength == ref_wl:
-                property_label = f"{prop_display}*"
-            elif wavelength:
-                property_label = f"{prop_display} ({wavelength}nm)"
-            else:
-                property_label = prop_display
-
-            row = html.Tr([
-                html.Td(property_label,
-                        style={'padding': '8px', 'borderBottom': '1px solid #ecf0f1', 'fontWeight': '500'}),
-                *[html.Td(mode_values.get(mode, "-"),
-                          style={'textAlign': 'center', 'padding': '8px',
-                                 'borderBottom': '1px solid #ecf0f1',
-                                 'color': mode_colors.get(mode, '#95a5a6') if mode_values.get(mode, "-") not in ["-", "N/A"] else '#95a5a6'})
-                  for mode in modes]
-            ])
-            table_rows.append(row)
-
-    return html.Table(table_rows, style={'width': '100%', 'borderCollapse': 'collapse'})
-
-
-def create_properties_table_safe(filtered_data, selected_row, selected_col):
-    """
-    Create a table showing aerosol properties (by mode)
-    Dynamically detects reference wavelength and available modes.
-    """
-    # Get reference wavelength and available modes dynamically
-    ref_wl = get_reference_wavelength(filtered_data)
-    modes = get_available_modes(filtered_data)
-    mode_colors = get_mode_colors()
-
-    # Define the properties and their display names
-    properties_config = [
-        ('optical_depth', 'Optical Depth', ref_wl),
-        ('ssa', 'Single Scattering Albedo', ref_wl),
-        ('real', 'Real Refractive Index', ref_wl),
-        ('imag', 'Imaginary Refractive Index', ref_wl),
-        ('asymmetry', 'Asymmetry Parameter', ref_wl),
-        # ('absorption_coefficient', 'Absorption Coefficient', ref_wl),
-        ('cross_section', 'Cross Section', ref_wl),
-        # ('extinction_coefficient', 'Extinction Coefficient', ref_wl),
-        ('number_concentration', 'Number Concentration', ref_wl),
-        # ('scattering_coefficient', 'Scattering Coefficient', ref_wl),
-        ('reff', 'Effective Radius', ''),
-        ('veff', 'Effective Variance', ''),
-    ]
-
-    # Create table header with updated property column title
-    header = html.Tr([
-        html.Th(f"Property (* {ref_wl} nm)", style={'textAlign': 'left', 'padding': '8px', 'borderBottom': '2px solid #34495e'}),
-        *[html.Th(mode.title(),
-                  style={'textAlign': 'center', 'padding': '8px', 'borderBottom': '2px solid #34495e',
-                         'color': mode_colors.get(mode, '#95a5a6'), 'fontWeight': 'bold'})
-          for mode in modes]
-    ])
-
-    # Create table rows
-    table_rows = [header]
-
-    for prop_base, prop_display, wavelength in properties_config:
-        # Build the property keys for each mode
-        mode_values = {}
-
-        for mode in modes:
-            if wavelength:
-                prop_key = f"{prop_base}_{mode}_{wavelength}"
-            else:
-                prop_key = f"{prop_base}_{mode}"
-
-            if prop_key in filtered_data:
-                try:
-                    # Handle both 1D (RSP) and 2D (HARP2) indexing
-                    prop_data = filtered_data[prop_key]
-                    if prop_data.ndim == 1:
-                        # 1D data (RSP): use selected_row as index
-                        value = prop_data[selected_row]
-                    elif prop_data.ndim == 2:
-                        # 2D data (HARP2): use [row, col] indexing
-                        value = prop_data[selected_row, selected_col]
-                    else:
-                        value = np.nan
-
-                    if np.isfinite(value):
-                        mode_values[mode] = f"{value:.3f}"
-                    else:
-                        mode_values[mode] = "N/A"
-                except:
-                    mode_values[mode] = "N/A"
-            else:
-                mode_values[mode] = "-"
-
-        # Create row if at least one mode has data
-        if any(val not in ["-", "N/A"] for val in mode_values.values()):
-            # Use * for reference wavelength properties, show wavelength for others
-            if wavelength == ref_wl:
-                property_label = f"{prop_display}*"
-            elif wavelength:
-                property_label = f"{prop_display} ({wavelength}nm)"
-            else:
-                property_label = prop_display
-
-            row = html.Tr([
-                html.Td(property_label,
-                        style={'padding': '8px', 'borderBottom': '1px solid #ecf0f1', 'fontWeight': '500'}),
-                *[html.Td(mode_values.get(mode, "-"),
-                          style={'textAlign': 'center', 'padding': '8px',
-                                 'borderBottom': '1px solid #ecf0f1',
-                                 'color': mode_colors.get(mode, '#95a5a6') if mode_values.get(mode, "-") not in ["-", "N/A"] else '#95a5a6'})
-                  for mode in modes]
-            ])
-            table_rows.append(row)
-
-    return html.Table(table_rows, style={'width': '100%', 'borderCollapse': 'collapse'})
 
 
 def create_properties_table_compact(filtered_data, selected_row, selected_col, selected_property):
@@ -745,144 +556,6 @@ def create_properties_table_compact(filtered_data, selected_row, selected_col, s
         metadata_section,
         table_section
     ])
-
-
-def create_properties_table_compact_safe(filtered_data, selected_row, selected_col, selected_property):
-    """
-    Create a compact table showing properties by mode
-    Matches single-file mode table format but scaled for comparison panel
-    """
-    # Define the properties and their display names (same as single-file mode)
-    properties_config = [
-        ('optical_depth', 'Optical Depth', '556'),
-        ('ssa', 'Single Scattering Albedo', '556'),
-        ('real', 'Real Refractive Index', '556'),
-        ('imag', 'Imaginary Refractive Index', '556'),
-        ('asymmetry', 'Asymmetry Parameter', '556'),
-        ('cross_section', 'Cross Section', '556'),
-        ('number_concentration', 'Number Concentration', '556'),
-        ('reff', 'Effective Radius', ''),
-        ('veff', 'Effective Variance', ''),
-    ]
-
-    modes = ['fine', 'coarse', 'dust']
-    mode_colors = {
-        'fine': '#3498db',
-        'coarse': '#e74c3c',
-        'dust': '#f39c12'
-    }
-
-    # Create table header
-    header = html.Tr([
-        html.Th("Property (* 556 nm)", style={
-            'textAlign': 'left',
-            'padding': '6px',
-            'borderBottom': '2px solid #34495e',
-            'fontSize': '14px',
-            'fontWeight': 'bold'
-        }),
-        *[html.Th(mode.title(), style={
-            'textAlign': 'center',
-            'padding': '6px',
-            'borderBottom': '2px solid #34495e',
-            'color': mode_colors[mode],
-            'fontWeight': 'bold',
-            'fontSize': '14px'
-        }) for mode in modes]
-    ])
-
-    # Create table rows
-    table_rows = [header]
-
-    for prop_base, prop_display, wavelength in properties_config:
-        # Build the property keys for each mode
-        mode_values = {}
-        has_data = False
-
-        for mode in modes:
-            if wavelength:
-                prop_key = f"{prop_base}_{mode}_{wavelength}"
-            else:
-                prop_key = f"{prop_base}_{mode}"
-
-            if prop_key in filtered_data:
-                try:
-                    # Handle both 1D (RSP) and 2D (HARP2) indexing
-                    prop_data = filtered_data[prop_key]
-                    if prop_data.ndim == 1:
-                        # 1D data (RSP): use selected_row as index
-                        value = prop_data[selected_row]
-                    elif prop_data.ndim == 2:
-                        # 2D data (HARP2): use [row, col] indexing
-                        value = prop_data[selected_row, selected_col]
-                    else:
-                        value = np.nan
-
-                    if np.isfinite(value):
-                        mode_values[mode] = f"{value:.3f}"
-                        has_data = True
-                    else:
-                        mode_values[mode] = "N/A"
-                except:
-                    mode_values[mode] = "N/A"
-            else:
-                mode_values[mode] = "-"
-
-        # Create row if at least one mode has data
-        if has_data and any(val not in ["-", "N/A"] for val in mode_values.values()):
-            # Format property label
-            if wavelength == '556':
-                property_label = f"{prop_display}*"
-            elif wavelength:
-                property_label = f"{prop_display} ({wavelength}nm)"
-            else:
-                property_label = prop_display
-
-            # Check if this property is selected
-            is_selected = any(
-                f"{prop_base}_{mode}_{wavelength}" == selected_property or
-                f"{prop_base}_{mode}" == selected_property
-                for mode in modes
-            )
-
-            row = html.Tr([
-                html.Td(property_label, style={
-                    'textAlign': 'left',
-                    'padding': '6px',
-                    'borderBottom': '1px solid #ecf0f1',
-                    'fontWeight': 'bold' if is_selected else '500',
-                    'fontSize': '12px',
-                    'backgroundColor': '#e8f5e9' if is_selected else 'transparent'
-                }),
-                *[html.Td(mode_values.get(mode, "-"), style={
-                    'textAlign': 'center',
-                    'padding': '6px',
-                    'borderBottom': '1px solid #ecf0f1',
-                    'color': mode_colors[mode] if mode_values.get(mode, "-") not in ["-", "N/A"] else '#95a5a6',
-                    'fontSize': '12px',
-                    'fontFamily': 'monospace',
-                    'backgroundColor': '#e8f5e9' if is_selected else 'transparent'
-                }) for mode in modes]
-            ])
-            table_rows.append(row)
-
-    if len(table_rows) == 1:  # Only header
-        return html.P("No properties available", style={'fontSize': '12px', 'color': '#999'})
-
-    return html.Div([
-        html.Table(table_rows, style={
-            'width': '100%',
-            'borderCollapse': 'collapse',
-            'fontSize': '12px'
-        })
-    ], style={
-        'maxHeight': '250px',
-        'overflowY': 'auto',
-        'border': '1px solid #ddd',
-        'borderRadius': '4px',
-        'backgroundColor': 'white',
-        'padding': '4px'
-    })
 
 
 # =============================================================================
@@ -2979,276 +2652,18 @@ def create_aod_total_plot(data_dict, selected_row, selected_col):
         return fig
 
 
-def create_aod_vs_time_plot(data_dict, title_suffix="", show_modes=False, max_cost=None):
+def create_residual_plot(data_dict, selected_row, selected_col, residual_type='both'):
     """
-    Create a plot showing AOD (total or spectral) vs time for airborne data (RSP).
-    Shows all spatial points along the flight path over time.
+    Create a residual plot for intensity and/or dolp (measured - modeled)
+    User can display residuals for intensity/dolp/both. However, we should add
+    percent difference instead of simple difference.
 
     Args:
-        data_dict: Dictionary containing data arrays including 'rsp_time' and AOD variables
-        title_suffix: Optional suffix to add to title (e.g., "File 1" for multi-file mode)
-        show_modes: If True, also plot individual mode contributions at reference wavelength
-        max_cost: Maximum cost threshold for filtering (points above threshold are excluded)
-
-    Returns:
-        fig: Plotly figure object
+        data_dict:
+        selected_row:
+        selected_col:
+        residual_type:
     """
-    try:
-        # Check if time data exists
-        if 'rsp_time' not in data_dict:
-            fig = go.Figure()
-            fig.add_annotation(
-                text="Time data (rsp_time) not available in this file",
-                xref="paper", yref="paper",
-                x=0.5, y=0.5,
-                showarrow=False,
-                font=dict(size=16)
-            )
-            fig.update_layout(title="AOD vs Time - No Data Available")
-            return fig
-
-        # Get time data
-        time_data = data_dict['rsp_time']
-        if time_data.ndim > 1:
-            time_data = time_data.flatten()
-
-        # Get cost function data for filtering
-        cost_mask = None
-        if max_cost is not None and 'cost_function' in data_dict:
-            cost_data = data_dict['cost_function']
-            if cost_data.ndim > 1:
-                cost_data = cost_data.flatten()
-            # Create mask: True for points that PASS the filter (cost <= threshold)
-            cost_mask = cost_data <= max_cost
-
-        # Find all available total AOD wavelengths
-        wavelength_aod_mapping = []
-        for var_name in sorted(data_dict.keys()):
-            if var_name.startswith('optical_depth_total_') and not var_name.endswith('_2d'):
-                try:
-                    wl_str = var_name.split('_')[-1]
-                    wl = float(wl_str)
-                    wavelength_aod_mapping.append((wl, var_name))
-                except ValueError:
-                    continue
-
-        if not wavelength_aod_mapping:
-            fig = go.Figure()
-            fig.add_annotation(
-                text="No total AOD data available",
-                xref="paper", yref="paper",
-                x=0.5, y=0.5,
-                showarrow=False,
-                font=dict(size=16)
-            )
-            fig.update_layout(title="AOD vs Time - No AOD Data")
-            return fig
-
-        # Get reference wavelength from data_dict (set during file reading)
-        ref_wl = data_dict['reference_wavelength']
-        ref_wl_int = int(round(ref_wl))
-
-        # Sort by wavelength for display
-        wavelength_aod_mapping.sort(key=lambda x: x[0])
-
-        # Create figure
-        fig = go.Figure()
-
-        # Generate colors for different wavelengths
-        wavelengths = [wl for wl, _ in wavelength_aod_mapping]
-        wl_colors = generate_wavelength_colors(wavelengths)
-
-        # Track if any data passes the filter
-        any_valid_data = False
-
-        # Plot total AOD for each wavelength (only if NOT showing modes)
-        if not show_modes:
-            for wl, var_name in wavelength_aod_mapping:
-                # Get AOD data
-                aod_data = data_dict.get(var_name)
-                if aod_data is None:
-                    continue
-
-                # Flatten if needed
-                if aod_data.ndim > 1:
-                    aod_data = aod_data.flatten()
-
-                # Ensure same length
-                min_len = min(len(time_data), len(aod_data))
-                time_subset = time_data[:min_len].copy()
-                aod_subset = aod_data[:min_len].copy()
-
-                # Apply cost filter by setting filtered points to NaN
-                if cost_mask is not None:
-                    cost_subset = cost_mask[:min_len]
-                    # Set points that FAIL the cost filter to NaN
-                    aod_subset[~cost_subset] = np.nan
-
-                # Check if we have any valid data
-                valid_mask = np.isfinite(time_subset) & np.isfinite(aod_subset)
-                if not np.any(valid_mask):
-                    continue
-
-                any_valid_data = True
-
-                # Add trace with connectgaps=False to show gaps where data was filtered
-                fig.add_trace(go.Scatter(
-                    x=time_subset,
-                    y=aod_subset,
-                    mode='lines+markers',
-                    name=f'{int(wl)} nm',
-                    line=dict(color=wl_colors.get(wl, '#000000'), width=2),
-                    marker=dict(size=8),
-                    connectgaps=False,  # Don't connect across filtered points
-                    hovertemplate='<b>Time:</b> %{x:.2f} UTC<br><b>AOD:</b> %{y:.5f}<extra></extra>'
-                ))
-
-        # Add individual mode traces at reference wavelength if requested
-        if show_modes and wavelength_aod_mapping:
-            # Use the reference wavelength (already calculated above)
-            # Get mode colors
-            mode_colors = get_mode_colors()
-
-            # Define modes to look for
-            modes = ['fine', 'coarse', 'dust', 'sea_salt']
-
-            # Plot each mode at reference wavelength
-            for mode in modes:
-                # Look for variable like optical_depth_fine_556
-                mode_var_name = f'optical_depth_{mode}_{ref_wl_int}'
-
-                if mode_var_name in data_dict:
-                    mode_data = data_dict[mode_var_name]
-
-                    # Flatten if needed
-                    if mode_data.ndim > 1:
-                        mode_data = mode_data.flatten()
-
-                    # Ensure same length
-                    min_len = min(len(time_data), len(mode_data))
-                    time_subset = time_data[:min_len].copy()
-                    mode_subset = mode_data[:min_len].copy()
-
-                    # Apply cost filter by setting filtered points to NaN
-                    if cost_mask is not None:
-                        cost_subset = cost_mask[:min_len]
-                        # Set points that FAIL the cost filter to NaN
-                        mode_subset[~cost_subset] = np.nan
-
-                    # Check if we have any valid data
-                    valid_mask = np.isfinite(time_subset) & np.isfinite(mode_subset)
-                    if np.any(valid_mask):
-                        any_valid_data = True
-
-                        # Add trace with dashed line style to distinguish from total AOD
-                        fig.add_trace(go.Scatter(
-                            x=time_subset,
-                            y=mode_subset,
-                            mode='lines+markers',
-                            name=f'{mode.capitalize()} ({ref_wl_int} nm)',
-                            line=dict(
-                                color=mode_colors.get(mode, '#000000'),
-                                width=2,
-                                dash='dash'
-                            ),
-                            marker=dict(size=8),
-                            legendgroup='modes',
-                            legendgrouptitle_text=f"Modes at {ref_wl_int} nm",
-                            connectgaps=False,  # Don't connect across filtered points
-                            hovertemplate='<b>Time:</b> %{x:.2f} UTC<br><b>AOD:</b> %{y:.5f}<extra></extra>'
-                        ))
-
-        # Check if no data passed the filter and show helpful message
-        if not any_valid_data and cost_mask is not None:
-            # Calculate minimum cost in the data to help user
-            min_cost = None
-            if 'cost_function' in data_dict:
-                cost_data = data_dict['cost_function']
-                if cost_data.ndim > 1:
-                    cost_data = cost_data.flatten()
-                valid_costs = cost_data[np.isfinite(cost_data)]
-                if len(valid_costs) > 0:
-                    min_cost = np.min(valid_costs)
-
-            # Show informative message
-            fig.add_annotation(
-                text=f"No data passes current cost filter (threshold: {max_cost:.3f})",
-                xref="paper", yref="paper",
-                x=0.5, y=0.6,
-                showarrow=False,
-                font=dict(size=16, color="#e74c3c"),
-                xanchor='center'
-            )
-
-            if min_cost is not None:
-                fig.add_annotation(
-                    text=f"Minimum cost in this file: {min_cost:.3f}<br>Try increasing the cost threshold to at least {min_cost:.3f}",
-                    xref="paper", yref="paper",
-                    x=0.5, y=0.4,
-                    showarrow=False,
-                    font=dict(size=14, color="#7f8c8d"),
-                    xanchor='center'
-                )
-
-        # Build title with optional suffix
-        if show_modes:
-            plot_title = f"Mode AOD vs Time at {ref_wl_int} nm (Flight Path)"
-        else:
-            plot_title = "Total AOD vs Time (Flight Path)"
-        if title_suffix:
-            plot_title = f"{plot_title}<br>{title_suffix}"
-
-        # Update layout
-        legend_title = "Aerosol Mode" if show_modes else "Wavelength"
-        fig.update_layout(
-            title=plot_title,
-            xaxis_title="Time (UTC hours)",
-            yaxis_title="Aerosol Optical Depth",
-            yaxis=dict(
-                exponentformat='none',  # Disable SI prefixes (μ, m, k, etc.)
-                tickformat='.5f'        # Show 5 decimal places in standard notation
-            ),
-            height=800,
-            hovermode='x unified',
-            showlegend=True,
-            legend=dict(
-                title=legend_title,
-                yanchor="top",
-                y=0.99,
-                xanchor="right",
-                x=0.99,
-                bgcolor="rgba(255, 255, 255, 0.8)",
-                bordercolor="Black",
-                borderwidth=1
-            )
-        )
-
-        return fig
-
-    except Exception as e:
-        print(f"Error creating AOD vs time plot: {e}")
-        import traceback
-        traceback.print_exc()
-
-        # Return error figure
-        fig = go.Figure()
-        fig.add_annotation(
-            text=f"Error creating AOD vs time plot: {str(e)}",
-            xref="paper", yref="paper",
-            x=0.5, y=0.5,
-            showarrow=False,
-            font=dict(size=14, color='red')
-        )
-        fig.update_layout(title="AOD vs Time - Error")
-        return fig
-
-
-# Create the residual plot
-def create_residual_plot(data_dict, selected_row, selected_col, residual_type='both'):
-
-    # Residual is taken for intensity and/or dolp by doing measured value - modeled value
-    # Can pick between just showing one variable and both
-
     try:
         # Get the intensity and DoLP data for the selected point
         intensity_data, dolp_data, wavelengths = get_channel_intensity_dolp_vza(
@@ -3433,6 +2848,290 @@ def create_residual_plot(data_dict, selected_row, selected_col, residual_type='b
         return fig
 
 
+def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode='total', title_suffix="", max_cost=None):
+    """
+    Create a plot showing any retrieval property vs time for airborne data (RSP).
+    Shows all available wavelengths for the specified property-mode combination.
+
+    Args:
+        data_dict: Dictionary containing data arrays including 'rsp_time' and property variables
+        property_name: Base name of the property (e.g., 'optical_depth', 'ssa', 'reff')
+        mode: Mode to plot ('total', 'fine', 'coarse', 'dust', 'sea_salt')
+        title_suffix: Optional suffix to add to title (e.g., "File 1" for multi-file mode)
+        max_cost: Maximum cost threshold for filtering (points above threshold are excluded)
+
+    Returns:
+        fig: Plotly figure object
+    """
+    try:
+        # Check if time data exists
+        if 'rsp_time' not in data_dict:
+            fig = go.Figure()
+            fig.add_annotation(
+                text="Time data (rsp_time) not available in this file",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5,
+                showarrow=False,
+                font=dict(size=16)
+            )
+            fig.update_layout(title="Property vs Time - No Data Available")
+            return fig
+
+        # Get time data
+        time_data = data_dict['rsp_time']
+        if time_data.ndim > 1:
+            time_data = time_data.flatten()
+
+        # Get cost function data for filtering
+        cost_mask = None
+        if max_cost is not None and 'cost_function' in data_dict:
+            cost_data = data_dict['cost_function']
+            if cost_data.ndim > 1:
+                cost_data = cost_data.flatten()
+            # Create mask: True for points that PASS the filter (cost <= threshold)
+            cost_mask = cost_data <= max_cost
+
+        # Define property display names and units
+        property_config = {
+            'optical_depth': {'display_name': 'Aerosol Optical Depth', 'y_label': 'Aerosol Optical Depth', 'decimals': 5, 'has_wavelength': True},
+            'ssa': {'display_name': 'Single Scattering Albedo', 'y_label': 'Single Scattering Albedo', 'decimals': 5, 'has_wavelength': True},
+            'real': {'display_name': 'Real Refractive Index', 'y_label': 'Real Refractive Index', 'decimals': 5, 'has_wavelength': True},
+            'imag': {'display_name': 'Imaginary Refractive Index', 'y_label': 'Imaginary Refractive Index', 'decimals': 5, 'has_wavelength': True},
+            'asymmetry': {'display_name': 'Asymmetry Parameter', 'y_label': 'Asymmetry Parameter', 'decimals': 5, 'has_wavelength': True},
+            'absorption_coefficient': {'display_name': 'Absorption Coefficient', 'y_label': 'Absorption Coefficient', 'decimals': 5, 'has_wavelength': True},
+            'scattering_coefficient': {'display_name': 'Scattering Coefficient', 'y_label': 'Scattering Coefficient', 'decimals': 5, 'has_wavelength': True},
+            'extinction_coefficient': {'display_name': 'Extinction Coefficient', 'y_label': 'Extinction Coefficient', 'decimals': 5, 'has_wavelength': True},
+            'reff': {'display_name': 'Effective Radius', 'y_label': 'Effective Radius (μm)', 'decimals': 3, 'has_wavelength': False},
+            'veff': {'display_name': 'Effective Variance', 'y_label': 'Effective Variance', 'decimals': 3, 'has_wavelength': False},
+            'number_concentration': {'display_name': 'Number Concentration', 'y_label': 'Number Concentration', 'decimals': 5, 'has_wavelength': True},
+            'cross_section': {'display_name': 'Cross Section', 'y_label': 'Cross Section', 'decimals': 5, 'has_wavelength': True}
+        }
+
+        # Get property configuration
+        prop_info = property_config.get(property_name, {
+            'display_name': property_name.replace('_', ' ').title(),
+            'y_label': property_name.replace('_', ' ').title(),
+            'decimals': 5,
+            'has_wavelength': True  # Default to wavelength-dependent
+        })
+
+        has_wavelength = prop_info['has_wavelength']
+
+        # Create figure
+        fig = go.Figure()
+        any_valid_data = False
+
+        # Find all variables for this property-mode combination
+        wavelength_mapping = []  # List of (wavelength, var_name) tuples
+
+        if has_wavelength:
+            # Wavelength-dependent: look for {property}_{mode}_{wavelength}
+            search_pattern = f'{property_name}_{mode}_'
+            for var_name in sorted(data_dict.keys()):
+                if var_name.startswith(search_pattern) and not var_name.endswith('_2d'):
+                    parts = var_name.split('_')
+                    if len(parts) >= 3 and parts[-1].isdigit():
+                        try:
+                            wl = float(parts[-1])
+                            wavelength_mapping.append((wl, var_name))
+                        except ValueError:
+                            continue
+
+            if not wavelength_mapping:
+                # No data found
+                fig.add_annotation(
+                    text=f"No {prop_info['display_name']} data available for {mode} mode",
+                    xref="paper", yref="paper",
+                    x=0.5, y=0.5,
+                    showarrow=False,
+                    font=dict(size=16)
+                )
+                fig.update_layout(title=f"{prop_info['display_name']} vs Time - No Data")
+                return fig
+
+            # Sort by wavelength
+            wavelength_mapping.sort(key=lambda x: x[0])
+
+            # Generate colors for different wavelengths
+            wavelengths = [wl for wl, _ in wavelength_mapping]
+            wl_colors = generate_wavelength_colors(wavelengths)
+
+            # Plot each wavelength
+            for wl, var_name in wavelength_mapping:
+                property_data = data_dict.get(var_name)
+                if property_data is None:
+                    continue
+
+                # Flatten if needed
+                if property_data.ndim > 1:
+                    property_data = property_data.flatten()
+
+                # Ensure same length
+                min_len = min(len(time_data), len(property_data))
+                time_subset = time_data[:min_len].copy()
+                property_subset = property_data[:min_len].copy()
+
+                # Apply cost filter
+                if cost_mask is not None:
+                    cost_subset = cost_mask[:min_len]
+                    property_subset[~cost_subset] = np.nan
+
+                # Check if we have any valid data
+                valid_mask = np.isfinite(time_subset) & np.isfinite(property_subset)
+                if not np.any(valid_mask):
+                    continue
+
+                any_valid_data = True
+
+                # Add trace
+                fig.add_trace(go.Scatter(
+                    x=time_subset,
+                    y=property_subset,
+                    mode='lines+markers',
+                    name=f'{int(wl)} nm',
+                    line=dict(color=wl_colors.get(wl, '#000000'), width=2),
+                    marker=dict(size=8),
+                    connectgaps=False,
+                    hovertemplate=f'<b>Time:</b> %{{x:.2f}} UTC<br><b>{prop_info["display_name"]}:</b> %{{y:.{prop_info["decimals"]}f}}<extra></extra>'
+                ))
+
+        else:
+            # Wavelength-independent: look for {property}_{mode}
+            var_name = f'{property_name}_{mode}'
+
+            if var_name in data_dict:
+                property_data = data_dict[var_name]
+
+                # Flatten if needed
+                if property_data.ndim > 1:
+                    property_data = property_data.flatten()
+
+                # Ensure same length
+                min_len = min(len(time_data), len(property_data))
+                time_subset = time_data[:min_len].copy()
+                property_subset = property_data[:min_len].copy()
+
+                # Apply cost filter
+                if cost_mask is not None:
+                    cost_subset = cost_mask[:min_len]
+                    property_subset[~cost_subset] = np.nan
+
+                # Check if we have any valid data
+                valid_mask = np.isfinite(time_subset) & np.isfinite(property_subset)
+                if np.any(valid_mask):
+                    any_valid_data = True
+
+                    # Get mode color
+                    mode_colors = get_mode_colors()
+
+                    # Add trace
+                    fig.add_trace(go.Scatter(
+                        x=time_subset,
+                        y=property_subset,
+                        mode='lines+markers',
+                        name=f'{mode.capitalize()} Mode',
+                        line=dict(color=mode_colors.get(mode, '#000000'), width=2),
+                        marker=dict(size=8),
+                        connectgaps=False,
+                        hovertemplate=f'<b>Time:</b> %{{x:.2f}} UTC<br><b>{prop_info["display_name"]}:</b> %{{y:.{prop_info["decimals"]}f}}<extra></extra>'
+                    ))
+
+            if not any_valid_data:
+                # No data found
+                fig.add_annotation(
+                    text=f"No {prop_info['display_name']} data available for {mode} mode",
+                    xref="paper", yref="paper",
+                    x=0.5, y=0.5,
+                    showarrow=False,
+                    font=dict(size=16)
+                )
+                fig.update_layout(title=f"{prop_info['display_name']} vs Time - No Data")
+                return fig
+
+        # Check if no data passed the filter
+        if not any_valid_data and cost_mask is not None:
+            min_cost = None
+            if 'cost_function' in data_dict:
+                cost_data = data_dict['cost_function']
+                if cost_data.ndim > 1:
+                    cost_data = cost_data.flatten()
+                valid_costs = cost_data[np.isfinite(cost_data)]
+                if len(valid_costs) > 0:
+                    min_cost = np.min(valid_costs)
+
+            fig.add_annotation(
+                text=f"No data passes current cost filter (threshold: {max_cost:.3f})",
+                xref="paper", yref="paper",
+                x=0.5, y=0.6,
+                showarrow=False,
+                font=dict(size=16, color="#e74c3c"),
+                xanchor='center'
+            )
+
+            if min_cost is not None:
+                fig.add_annotation(
+                    text=f"Minimum cost in this file: {min_cost:.3f}<br>Try increasing the cost threshold to at least {min_cost:.3f}",
+                    xref="paper", yref="paper",
+                    x=0.5, y=0.4,
+                    showarrow=False,
+                    font=dict(size=14, color="#7f8c8d"),
+                    xanchor='center'
+                )
+
+        # Build title
+        mode_label = "Total" if mode == 'total' else f"{mode.capitalize()} Mode"
+        if has_wavelength:
+            plot_title = f"{prop_info['display_name']} ({mode_label}) vs Time (Flight Path)"
+            legend_title = "Wavelength"
+        else:
+            plot_title = f"{prop_info['display_name']} - {mode_label} vs Time (Flight Path)"
+            legend_title = ""
+
+        if title_suffix:
+            plot_title = f"{plot_title}<br>{title_suffix}"
+
+        # Update layout
+        fig.update_layout(
+            title=plot_title,
+            xaxis_title="Time (UTC hours)",
+            yaxis_title=prop_info['y_label'],
+            yaxis=dict(
+                exponentformat='none',
+                tickformat=f'.{prop_info["decimals"]}f'
+            ),
+            height=800,
+            hovermode='x unified',
+            showlegend=True if has_wavelength else False,
+            legend=dict(
+                title=legend_title,
+                yanchor="top",
+                y=0.99,
+                xanchor="right",
+                x=0.99,
+                bgcolor="rgba(255, 255, 255, 0.8)",
+                bordercolor="Black",
+                borderwidth=1
+            ) if has_wavelength else None
+        )
+
+        return fig
+
+    except Exception as e:
+        print(f"Error creating property vs time plot: {e}")
+        import traceback
+        traceback.print_exc()
+
+        # Return error figure
+        fig = go.Figure()
+        fig.add_annotation(
+            text=f"Error creating property vs time plot: {str(e)}",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5,
+            showarrow=False,
+            font=dict(size=14, color='red')
+        )
+        fig.update_layout(title="Property vs Time - Error")
+        return fig
 def create_polarized_reflectance_comparison_plot(intensity_data_1, dolp_data_1,
                                                  intensity_data_2, dolp_data_2,
                                                  wavelengths, wl_colors,
@@ -4915,11 +4614,12 @@ def run_app(initial_file_path, directory_path):
                     }),
                     html.Div(id='click-info', style={'marginBottom': '15px', 'fontSize': '14px'}),
                     html.Div(id='panel-properties-table', style={'maxHeight': '400px', 'overflowY': 'auto'}),
-                ], style={
+                ], id='selected-properties-container', style={
                     'padding': '15px',
                     'border': '1px solid #bdc3c7',
                     'borderRadius': '5px',
-                    'backgroundColor': '#ffffff'
+                    'backgroundColor': '#ffffff',
+                    'display': 'none'  # Hidden by default until file loaded and point clicked
                 }),
 
             ], style={
@@ -5104,17 +4804,30 @@ def run_app(initial_file_path, directory_path):
                     html.Div(id='aod-total-panel-properties-table', style={'display': 'none'}),
                 ], id='plot-aod-total', style={'display': 'none'}),
 
-                # AOD vs Time plot container (for airborne/RSP data)
+                # Property vs Time plot container (for airborne/RSP data)
                 html.Div([
-                    # Checkbox to show individual mode contributions
+                    # Property selector dropdown
                     html.Div([
-                        dcc.Checklist(
-                            id='show-modes-checkbox',
-                            options=[{'label': ' Show individual mode contributions at reference wavelength', 'value': 'show'}],
-                            value=[],
-                            style={'marginBottom': '15px', 'textAlign': 'center'}
-                        )
-                    ]),
+                        html.Label("Select Property to Plot:", style={
+                            'fontWeight': 'bold',
+                            'marginBottom': '5px',
+                            'display': 'block',
+                            'fontSize': '14px',
+                            'textAlign': 'center'
+                        }),
+                        dcc.Dropdown(
+                            id='property-time-selector',
+                            options=[],
+                            value='optical_depth|total',
+                            placeholder="Aerosol Optical Depth - Total",
+                            style={
+                                'marginBottom': '15px',
+                                'fontSize': '12px',
+                                'maxWidth': '500px',
+                                'margin': '0 auto'
+                            }
+                        ),
+                    ], style={'marginBottom': '20px'}),
 
                     # Container for single or dual plots (controlled by callback)
                     html.Div([
@@ -5164,7 +4877,7 @@ def run_app(initial_file_path, directory_path):
     def update_plot_type_options(file_path_1, file_path_2):
         """
         Dynamically update plot type dropdown options based on file type.
-        Shows "AOD vs Time" option only for files with rsp_time data (RSP files).
+        Shows "Property vs Time" option only for files with rsp_time data (RSP files).
         Checks both file selectors for multi-file mode.
         """
         # Base options available for all files
@@ -5185,7 +4898,7 @@ def run_app(initial_file_path, directory_path):
                     cache_entry = get_cached_data(file_path)
                     data_dict = cache_entry['data_dict']
 
-                    # If rsp_time exists in either file, add the AOD vs Time option
+                    # If rsp_time exists in either file, add the Property vs Time option
                     if 'rsp_time' in data_dict:
                         has_time_data = True
                         print(f"Found rsp_time in {os.path.basename(file_path)}")
@@ -5194,9 +4907,135 @@ def run_app(initial_file_path, directory_path):
                     print(f"Error checking for time data in {file_path}: {e}")
 
         if has_time_data:
-            base_options.append({'label': 'AOD vs Time', 'value': 'aod_time'})
+            base_options.append({'label': 'Property vs Time', 'value': 'aod_time'})
 
         return base_options
+
+    # Callback to populate property selector for time series plots
+    @app.callback(
+        Output('property-time-selector', 'options'),
+        [Input('file-selector', 'value'),
+         Input('individual-file-selector-2', 'value')]
+    )
+    def update_property_time_options(file_path_1, file_path_2):
+        """
+        Dynamically populate the property selector dropdown with available property-mode combinations.
+        Each entry represents a specific property and mode (e.g., "AOD - Fine Mode", "SSA - Dust Mode").
+        For AOD, also includes a "Total" option.
+        """
+        print("Doing callback: update_property_time_options")
+
+        # Collect property-mode combinations from both files
+        # Structure: {property_name: set of modes}
+        property_modes = {}
+
+        for file_path in [file_path_1, file_path_2]:
+            if file_path:
+                try:
+                    cache_entry = get_cached_data(file_path)
+                    data_dict = cache_entry['data_dict']
+
+                    # Only process if file has time data
+                    if 'rsp_time' not in data_dict:
+                        continue
+
+                    # Extract property-mode combinations from variables
+                    for var_name in data_dict.keys():
+                        parts = var_name.split('_')
+
+                        # Skip non-relevant variables
+                        if var_name.startswith('rsp_') or var_name.endswith('_2d'):
+                            continue
+                        if var_name in ['latitude', 'longitude', 'cost_function', 'reference_wavelength',
+                                        'file_format', 'available_modes', 'output_channels']:
+                            continue
+
+                        # Pattern 1: {property}_total_{wavelength} (e.g., optical_depth_total_556)
+                        # This means we can offer a "total" option for this property
+                        if len(parts) >= 3 and parts[-2] == 'total' and parts[-1].isdigit():
+                            base_property = '_'.join(parts[:-2])
+                            if base_property not in property_modes:
+                                property_modes[base_property] = set()
+                            property_modes[base_property].add('total')
+
+                        # Pattern 2: {property}_{mode}_{wavelength} (e.g., ssa_fine_556)
+                        elif len(parts) >= 3 and parts[-1].isdigit():
+                            mode = parts[-2]
+                            if mode in ['fine', 'coarse', 'dust', 'sea_salt']:
+                                base_property = '_'.join(parts[:-2])
+                                if base_property not in property_modes:
+                                    property_modes[base_property] = set()
+                                property_modes[base_property].add(mode)
+
+                        # Pattern 3: {property}_{mode} WITHOUT wavelength (e.g., reff_fine, veff_dust)
+                        elif len(parts) == 2 and parts[-1] in ['fine', 'coarse', 'dust', 'sea_salt']:
+                            base_property = parts[0]
+                            mode = parts[-1]
+                            if base_property not in property_modes:
+                                property_modes[base_property] = set()
+                            property_modes[base_property].add(mode)
+
+                except Exception as e:
+                    print(f"Error extracting properties from {file_path}: {e}")
+
+        # Create friendly display names for properties
+        property_display_names = {
+            'optical_depth': 'Aerosol Optical Depth',
+            'ssa': 'Single Scattering Albedo',
+            'real': 'Real Refractive Index',
+            'imag': 'Imaginary Refractive Index',
+            'asymmetry': 'Asymmetry Parameter',
+            'absorption_coefficient': 'Absorption Coefficient',
+            'scattering_coefficient': 'Scattering Coefficient',
+            'extinction_coefficient': 'Extinction Coefficient',
+            'reff': 'Effective Radius',
+            'veff': 'Effective Variance',
+            'number_concentration': 'Number Concentration',
+            'cross_section': 'Cross Section'
+        }
+
+        # Build options list with property-mode combinations
+        options = []
+
+        # Define custom property order: AOD first, then real/imag together, rest alphabetically
+        priority_order = ['optical_depth', 'real', 'imag']
+
+        # Get remaining properties (not in priority list) and sort alphabetically
+        remaining_props = sorted([p for p in property_modes.keys() if p not in priority_order])
+
+        # Combine: priority properties + remaining sorted properties
+        ordered_properties = [p for p in priority_order if p in property_modes] + remaining_props
+
+        # Build options in custom order
+        for prop in ordered_properties:
+            display_name = property_display_names.get(prop, prop.replace('_', ' ').title())
+            modes = property_modes[prop]
+
+            # For AOD (optical_depth), add Total option first
+            if prop == 'optical_depth' and 'total' in modes:
+                options.append({
+                    'label': f'{display_name} - Total',
+                    'value': f'{prop}|total'
+                })
+
+            # Add mode-specific options
+            mode_order = ['fine', 'coarse', 'dust', 'sea_salt']
+            for mode in mode_order:
+                if mode in modes and mode != 'total':
+                    mode_label = mode.capitalize()
+                    options.append({
+                        'label': f'{display_name} - {mode_label} Mode',
+                        'value': f'{prop}|{mode}'
+                    })
+
+        # If no properties found, add a default optical_depth option
+        if not options:
+            options = [{'label': 'Aerosol Optical Depth - Total', 'value': 'optical_depth|total'}]
+
+        if debug > 0:
+            print(f"Available time-series property-mode combinations: {[opt['value'] for opt in options]}")
+
+        return options
 
     # Callback to control which plot container is visible
     @app.callback(
@@ -5778,8 +5617,8 @@ def run_app(initial_file_path, directory_path):
         return create_aod_total_plot(data_dict, selected_row, selected_col)
 
     # ---------------------------------------------------
-    # AOD VS TIME CALLBACKS
-    #   -Callbacks to update the AOD vs Time plot (for RSP/airborne data)
+    # PROPERTY VS TIME CALLBACKS
+    #   -Callbacks to update the Property vs Time plot (for RSP/airborne data)
     #   -Supports both single and multi-file comparison modes
     # ---------------------------------------------------
     @app.callback(
@@ -5793,18 +5632,26 @@ def run_app(initial_file_path, directory_path):
          Input('individual-file-selector-2', 'value'),
          Input('individual-analysis-mode', 'value'),
          Input('plot-type-selector', 'value'),
-         Input('show-modes-checkbox', 'value'),
+         Input('property-time-selector', 'value'),
          Input('applied-cost-value', 'data')],
         prevent_initial_call=True
     )
-    def update_aod_time_plots(file_path_1, file_path_2, analysis_mode, active_tab, show_modes_value, max_cost):
-        print("Doing callback: update_aod_time_plots")
+    def update_aod_time_plots(file_path_1, file_path_2, analysis_mode, active_tab, selected_property, max_cost):
+        print(f"Doing callback: update_aod_time_plots with property={selected_property}")
         """
-        Callback for AOD vs Time plot for airborne/RSP data.
+        Callback for Property vs Time plot for airborne/RSP data.
         Shows single plot for single-file mode, or dual side-by-side plots for multi-file mode.
         """
-        # Convert checkbox value to boolean
-        show_modes = 'show' in (show_modes_value or [])
+        # Parse selected_property to extract property and mode
+        # Format: "property|mode" (e.g., "optical_depth|total", "ssa|fine")
+        if not selected_property or '|' not in selected_property:
+            # Default to total AOD if no valid property selected
+            property_name = 'optical_depth'
+            mode = 'total'
+        else:
+            parts = selected_property.split('|')
+            property_name = parts[0]
+            mode = parts[1]
         empty_fig = go.Figure()
 
         if active_tab != 'aod_time':
@@ -5853,7 +5700,7 @@ def run_app(initial_file_path, directory_path):
                 if 'rsp_time' in data_dict_1:
                     has_time_1 = True
                     filename1 = os.path.basename(file_path_1)
-                    fig1 = create_aod_vs_time_plot(data_dict_1, title_suffix=f"File 1: {filename1}", show_modes=show_modes, max_cost=max_cost)
+                    fig1 = create_property_vs_time_plot(data_dict_1, property_name=property_name, mode=mode, title_suffix=f"File 1: {filename1}", max_cost=max_cost)
                 else:
                     fig1 = go.Figure()
                     fig1.add_annotation(
@@ -5881,7 +5728,7 @@ def run_app(initial_file_path, directory_path):
                 if 'rsp_time' in data_dict_2:
                     has_time_2 = True
                     filename2 = os.path.basename(file_path_2)
-                    fig2 = create_aod_vs_time_plot(data_dict_2, title_suffix=f"File 2: {filename2}", show_modes=show_modes, max_cost=max_cost)
+                    fig2 = create_property_vs_time_plot(data_dict_2, property_name=property_name, mode=mode, title_suffix=f"File 2: {filename2}", max_cost=max_cost)
                 else:
                     fig2 = go.Figure()
                     fig2.add_annotation(
@@ -5910,6 +5757,39 @@ def run_app(initial_file_path, directory_path):
             elif not has_time_1 and not has_time_2:
                 warning_msg = "⚠️ Neither file contains time data (rsp_time). This plot type requires airborne/RSP data."
 
+            # Synchronize y-axes when both files have valid data
+            if has_time_1 and has_time_2:
+                try:
+                    # Extract all y-values from both figures
+                    y_values = []
+
+                    # Get y-values from fig1
+                    for trace in fig1.data:
+                        if hasattr(trace, 'y') and trace.y is not None:
+                            y_vals = [y for y in trace.y if y is not None and not np.isnan(y)]
+                            y_values.extend(y_vals)
+
+                    # Get y-values from fig2
+                    for trace in fig2.data:
+                        if hasattr(trace, 'y') and trace.y is not None:
+                            y_vals = [y for y in trace.y if y is not None and not np.isnan(y)]
+                            y_values.extend(y_vals)
+
+                    if y_values:
+                        # Compute global min and max
+                        y_min = min(y_values)
+                        y_max = max(y_values)
+
+                        # Add padding (10% on each side as a start)
+                        y_range = y_max - y_min
+                        y_padding = y_range * 0.1 if y_range > 0 else 0.1 * abs(y_max)
+
+                        # Set the same y-axis range for both figures
+                        fig1.update_yaxes(range=[y_min - y_padding, y_max + y_padding])
+                        fig2.update_yaxes(range=[y_min - y_padding, y_max + y_padding])
+                except Exception as e:
+                    print(f"Warning: Could not synchronize y-axes: {e}")
+
             return (
                 {'display': 'none'},   # hide single
                 {'display': 'block'},  # show multi
@@ -5929,7 +5809,7 @@ def run_app(initial_file_path, directory_path):
                     showarrow=False,
                     font=dict(size=16, color="#7f8c8d")
                 )
-                msg_fig.update_layout(title="AOD vs Time")
+                msg_fig.update_layout(title="Property vs Time")
                 return (
                     {'display': 'block'},
                     {'display': 'none'},
@@ -5950,7 +5830,7 @@ def run_app(initial_file_path, directory_path):
                     showarrow=False,
                     font=dict(size=16, color="red")
                 )
-                error_fig.update_layout(title="AOD vs Time - Error")
+                error_fig.update_layout(title="Property vs Time - Error")
                 return (
                     {'display': 'block'},
                     {'display': 'none'},
@@ -5958,8 +5838,8 @@ def run_app(initial_file_path, directory_path):
                     ""
                 )
 
-            # Create the AOD vs time plot
-            single_fig = create_aod_vs_time_plot(data_dict, show_modes=show_modes, max_cost=max_cost)
+            # Create the property vs time plot
+            single_fig = create_property_vs_time_plot(data_dict, property_name=property_name, mode=mode, max_cost=max_cost)
             return (
                 {'display': 'block'},
                 {'display': 'none'},
@@ -6603,7 +6483,8 @@ def run_app(initial_file_path, directory_path):
          Output('combined-plot', 'figure'),
          Output('clicked-point-store', 'data', allow_duplicate=True),
          Output('click-info', 'children'),
-         Output('panel-properties-table', 'children')],
+         Output('panel-properties-table', 'children'),
+         Output('selected-properties-container', 'style')],
         [Input('property-selector', 'value'),
          # Input('cost-input', 'value'),
          Input('applied-cost-value', 'data'),
@@ -6635,13 +6516,15 @@ def run_app(initial_file_path, directory_path):
         # Use the current file data instead of global data_dict
         if current_file_data is None:
             empty_fig = create_placeholder_figure("No file selected")
-            return (empty_fig, empty_fig, None, "No file selected", "")
+            hidden_style = {'display': 'none'}
+            return (empty_fig, empty_fig, None, "No file selected", "", hidden_style)
 
         # Get current file path from store and read data
         file_path = current_file_data.get('file_path')
         if file_path is None:
             empty_fig = create_placeholder_figure("Please select a file to view data")
-            return (empty_fig, empty_fig, None, "Please select a file", "")
+            hidden_style = {'display': 'none'}
+            return (empty_fig, empty_fig, None, "Please select a file", "", hidden_style)
 
         # Read data from cache NOT from current file path
         cached_data = get_cached_data(file_path)
@@ -6843,31 +6726,25 @@ def run_app(initial_file_path, directory_path):
                 html.Br()
             ]
 
-            if sza_deg is not None and np.isfinite(sza_deg):
-                click_info_parts.extend([
-                    html.Strong("SZA: "), f"{sza_deg:.3f}°",
-                    html.Br()
-                ])
-
-            if raa_scalar is not None and np.isfinite(raa_scalar):
-                click_info_parts.extend([
-                    html.Strong("RAA: "), f"{raa_scalar:.3f}°",
-                    html.Br()
-                ])
-
-            click_info_parts.extend([
-                html.Strong("Selected: "), f"{selected_property} = {val:.3f}",
-                html.Br(),
-                html.Strong("Cost: "), f"{cost:.3f}"
-            ])
-
             click_info = html.Div(click_info_parts)
 
-            # properties_table = create_properties_table(filtered_data, selected_row, selected_col)
-            properties_table = create_properties_table(filtered_data, selected_row, selected_col, selected_property)
+            # Use compact version for consistent styling
+            properties_table = create_properties_table_compact(filtered_data, selected_row, selected_col, selected_property)
+
+        # Control panel visibility: show only when file is loaded AND point is clicked
+        if clicked_point_data is not None and 'row' in clicked_point_data:
+            panel_style = {
+                'padding': '15px',
+                'border': '1px solid #bdc3c7',
+                'borderRadius': '5px',
+                'backgroundColor': '#ffffff',
+                'display': 'block'
+            }
+        else:
+            panel_style = {'display': 'none'}
 
         return (scatter_fig, combined_fig,
-                clicked_point_data, click_info, properties_table)
+                clicked_point_data, click_info, properties_table, panel_style)
 
     # ---------------------------------------------------
     # EXPORT CALLBACK #1 (16 of 18 total)

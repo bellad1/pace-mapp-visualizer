@@ -829,7 +829,7 @@ def read_hdf5_variables(file_path):
             # Get cost function if available
             if 'geophysical_data/normalized_data_cf' in f:
                 data_dict['cost_function'] = f['geophysical_data/normalized_data_cf'][:]
-                data_dict['cost_function_data'] = f['geophysical_data/data_cf'][:]
+                data_dict['cost_function_data'] = f['geophysical_data/normalized_data_cf'][:]
             else:
                 # Create a placeholder cost function
                 print("Cost function not found, creating placeholder")
@@ -6869,7 +6869,7 @@ def run_app(initial_file_path, directory_path):
             return no_update
 
     # Run the app
-    app.run_server(debug=True, port=8050)
+    app.run(debug=True, port=8050)
 
 
 # Run the application

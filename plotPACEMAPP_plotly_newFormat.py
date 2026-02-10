@@ -4,7 +4,6 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.io as pio
 from dash import Dash, dcc, html, Input, Output, State, callback_context, no_update
-# from dash.dependencies import Input, Output, State
 import colorsys
 import argparse
 import glob
@@ -558,6 +557,155 @@ def create_properties_table_compact(filtered_data, selected_row, selected_col, s
     ])
 
 
+def create_time_point_properties_table(data_dict, time_index, source_plot, file_path):
+    """
+    Create a properties table for a clicked time point in RSP data.
+    Similar to create_properties_table_compact but adapted for 1D time-series data.
+
+    Args:
+        data_dict: Dictionary containing RSP data arrays
+        time_index: Index in the time array (original, not filtered)
+        source_plot: 'single', 'plot-1', or 'plot-2'
+        file_path: Path to the data file
+
+    Returns:
+        html.Div: Formatted properties table
+    """
+    try:
+        # Get available modes and reference wavelength
+        modes = get_available_modes(data_dict)
+        ref_wl = get_reference_wavelength(data_dict)
+        mode_colors = get_mode_colors()
+
+        # Properties configuration (same as scatter plot version)
+        properties_config = [
+            ('optical_depth', 'Optical Depth', ref_wl),
+            ('ssa', 'Single Scattering Albedo', ref_wl),
+            ('real', 'Real Refractive Index', ref_wl),
+            ('imag', 'Imaginary Refractive Index', ref_wl),
+            ('asymmetry', 'Asymmetry Parameter', ref_wl),
+            ('cross_section', 'Cross Section', ref_wl),
+            ('number_concentration', 'Number Concentration', ref_wl),
+            ('reff', 'Effective Radius', ''),
+            ('veff', 'Effective Variance', ''),
+        ]
+
+        # Create table header
+        header = html.Tr([
+            html.Th(f"Property (* {ref_wl} nm)", style={
+                'textAlign': 'left',
+                'padding': '6px',
+                'borderBottom': '2px solid #34495e',
+                'fontSize': '14px',
+                'fontWeight': 'bold'
+            }),
+            *[html.Th(mode.title(), style={
+                'textAlign': 'center',
+                'padding': '6px',
+                'borderBottom': '2px solid #34495e',
+                'color': mode_colors.get(mode, '#95a5a6'),
+                'fontWeight': 'bold',
+                'fontSize': '14px'
+            }) for mode in modes]
+        ])
+
+        # Create table rows
+        table_rows = [header]
+
+        for prop_base, prop_display, wavelength in properties_config:
+            mode_values = {}
+            has_data = False
+
+            for mode in modes:
+                if wavelength:
+                    prop_key = f"{prop_base}_{mode}_{wavelength}"
+                else:
+                    prop_key = f"{prop_base}_{mode}"
+
+                if prop_key in data_dict:
+                    try:
+                        # RSP data is 1D, so direct indexing
+                        value = data_dict[prop_key][time_index]
+
+                        if np.isfinite(value):
+                            mode_values[mode] = f"{value:.3f}"
+                            has_data = True
+                        else:
+                            mode_values[mode] = "N/A"
+                    except:
+                        mode_values[mode] = "N/A"
+                else:
+                    mode_values[mode] = "-"
+
+            if has_data and any(val not in ["-", "N/A"] for val in mode_values.values()):
+                # Property label
+                if wavelength == ref_wl:
+                    property_label = f"{prop_display}*"
+                elif wavelength:
+                    property_label = f"{prop_display} ({wavelength}nm)"
+                else:
+                    property_label = prop_display
+
+                row = html.Tr([
+                    html.Td(property_label, style={
+                        'padding': '6px',
+                        'borderBottom': '1px solid #ecf0f1',
+                        'fontWeight': '500',
+                        'fontSize': '12px'
+                    }),
+                    *[html.Td(mode_values.get(mode, "-"), style={
+                        'textAlign': 'center',
+                        'padding': '6px',
+                        'borderBottom': '1px solid #ecf0f1',
+                        'color': mode_colors.get(mode, '#95a5a6') if mode_values.get(mode, "-") not in ["-", "N/A"] else '#95a5a6',
+                        'fontSize': '12px',
+                        'fontFamily': 'monospace'
+                    }) for mode in modes]
+                ])
+                table_rows.append(row)
+
+        if len(table_rows) == 1:  # Only header
+            return html.P("No properties available", style={'fontSize': '12px', 'color': '#999', 'textAlign': 'center'})
+
+        # Create table with file identifier for multi-file mode
+        file_label = ""
+        if source_plot in ['plot-1', 'plot-2']:
+            file_num = '1' if source_plot == 'plot-1' else '2'
+            filename = os.path.basename(file_path) if file_path else f"File {file_num}"
+            file_label = html.Div([
+                html.Strong(f"File: "), filename
+            ], style={
+                'marginBottom': '10px',
+                'fontSize': '12px',
+                'textAlign': 'center',
+                'color': '#7f8c8d'
+            })
+
+        return html.Div([
+            file_label,
+            html.Div([
+                html.Table(table_rows, style={
+                    'width': '100%',
+                    'borderCollapse': 'collapse',
+                    'fontSize': '12px'
+                })
+            ], style={
+                'maxHeight': '300px',
+                'overflowY': 'auto',
+                'border': '1px solid #ddd',
+                'borderRadius': '4px',
+                'backgroundColor': 'white',
+                'padding': '4px'
+            })
+        ])
+
+    except Exception as e:
+        print(f"Error creating time point properties table: {e}")
+        import traceback
+        traceback.print_exc()
+        return html.P(f"Error creating table: {str(e)}", style={'color': 'red', 'fontSize': '12px'})
+
+
 # =============================================================================
 # CONFIGURATION AND CONSTANTS
 # =============================================================================
@@ -602,11 +750,20 @@ def get_wavelength_mapping_rsp():
         wavelength_mapping (list): containing each measurement wavelength,
             corresponding instrument, and number of views.
     """
+    num_angles = 126
+    # wavelength_mapping = [
+    #     (555, 'RSP', 126),
+    #     (410, 'RSP', 126),
+    #     (469, 'RSP', 126),
+    #     (670, 'RSP', 126),
+    #     (864, 'RSP', 126)
+    # ]
     wavelength_mapping = [
-        (555, 'RSP', 126),
-        (410, 'RSP', 126),
-        (469, 'RSP', 126),
-        (670, 'RSP', 126)
+        (555, 'RSP', num_angles),
+        (410, 'RSP', num_angles),
+        (469, 'RSP', num_angles),
+        (670, 'RSP', num_angles),
+        (864, 'RSP', num_angles)
     ]
 
     return wavelength_mapping
@@ -701,23 +858,6 @@ def build_channel_ranges(wavelength_mapping, output_channels_order=None):
         print("Total DoLP angles: {}".format(total_dolp_angles))
 
     return channel_ranges, metadata
-
-
-def get_instrument_for_wavelength(wavelength, wavelength_mapping):
-    """
-    Get instrument type for given wavelength.
-
-    Args:
-        wavelength: wavelength value (int or float)
-        wavelength_mapping: list of tuples (wavelength, instrument, n_vza)
-
-    Returns:
-        instrument (str): Instrument name ('SPEX', 'HARP', 'OCI')
-    """
-    for wl, instrument, _ in wavelength_mapping:
-        if wl == int(wavelength):
-            return instrument
-    return None
 
 
 # =============================================================================
@@ -1155,8 +1295,8 @@ def read_rsp_hdf5_variables(file_path):
 
             # Get cost function (RSP naming)
             if 'retrieval_normalized_cost_function_data' in f:
-                data_dict['cost_function'] = f['retrieval_normalized_cost_function_total'][:]
-                data_dict['cost_function_data'] = f['retrieval_normalized_cost_function_data'][:]
+                data_dict['cost_function'] = f['retrieval_normalized_cost_function_data'][:]
+                # data_dict['cost_function_data'] = f['retrieval_normalized_cost_function_data'][:]
             else:
                 # Create a placeholder cost function
                 print("Cost function not found, creating placeholder")
@@ -1193,9 +1333,9 @@ def read_rsp_hdf5_variables(file_path):
 
                 # Skip variables we already processed
                 if key in ['lat', 'lon', 'sensor_zenith', 'raa', 'sza', 'ymvec', 'fvec',
-                          'retrieval_normalized_cost_function_data',
-                          'retrieval_normalized_cost_function_total',
-                          'output_channels', 'rsp_time']:
+                           'retrieval_normalized_cost_function_data',
+                           'retrieval_normalized_cost_function_total',
+                           'output_channels', 'rsp_time']:
                     continue
 
                 # Skip excluded variables
@@ -2848,7 +2988,7 @@ def create_residual_plot(data_dict, selected_row, selected_col, residual_type='b
         return fig
 
 
-def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode='total', title_suffix="", max_cost=None):
+def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode='total', title_suffix="", max_cost=None, highlight_time_index=None, highlight_y_value=None):
     """
     Create a plot showing any retrieval property vs time for airborne data (RSP).
     Shows all available wavelengths for the specified property-mode combination.
@@ -2859,6 +2999,8 @@ def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode=
         mode: Mode to plot ('total', 'fine', 'coarse', 'dust', 'sea_salt')
         title_suffix: Optional suffix to add to title (e.g., "File 1" for multi-file mode)
         max_cost: Maximum cost threshold for filtering (points above threshold are excluded)
+        highlight_time_index: Optional index of point to highlight (adds visual marker)
+        highlight_y_value: Optional y-value of the clicked point for single marker highlight
 
     Returns:
         fig: Plotly figure object
@@ -2971,10 +3113,14 @@ def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode=
                 time_subset = time_data[:min_len].copy()
                 property_subset = property_data[:min_len].copy()
 
+                # Create index array to preserve mapping through cost filtering
+                original_indices = np.arange(min_len)
+
                 # Apply cost filter
                 if cost_mask is not None:
                     cost_subset = cost_mask[:min_len]
                     property_subset[~cost_subset] = np.nan
+                    # Note: original_indices stays unchanged - this is key!
 
                 # Check if we have any valid data
                 valid_mask = np.isfinite(time_subset) & np.isfinite(property_subset)
@@ -2982,6 +3128,9 @@ def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode=
                     continue
 
                 any_valid_data = True
+
+                # Convert to list of lists for JSON serialization
+                customdata_list = [[int(idx)] for idx in original_indices]
 
                 # Add trace
                 fig.add_trace(go.Scatter(
@@ -2992,7 +3141,8 @@ def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode=
                     line=dict(color=wl_colors.get(wl, '#000000'), width=2),
                     marker=dict(size=8),
                     connectgaps=False,
-                    hovertemplate=f'<b>Time:</b> %{{x:.2f}} UTC<br><b>{prop_info["display_name"]}:</b> %{{y:.{prop_info["decimals"]}f}}<extra></extra>'
+                    customdata=customdata_list,
+                    hovertemplate=f'<b>Time:</b> %{{x:.2f}} UTC<br><b>Wavelength:</b> {int(wl)} nm<br><b>{prop_info["display_name"]}:</b> %{{y:.{prop_info["decimals"]}f}}<extra></extra>'
                 ))
 
         else:
@@ -3011,10 +3161,14 @@ def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode=
                 time_subset = time_data[:min_len].copy()
                 property_subset = property_data[:min_len].copy()
 
+                # Create index array to preserve mapping through cost filtering
+                original_indices = np.arange(min_len)
+
                 # Apply cost filter
                 if cost_mask is not None:
                     cost_subset = cost_mask[:min_len]
                     property_subset[~cost_subset] = np.nan
+                    # Note: original_indices stays unchanged - this is key!
 
                 # Check if we have any valid data
                 valid_mask = np.isfinite(time_subset) & np.isfinite(property_subset)
@@ -3023,6 +3177,13 @@ def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode=
 
                     # Get mode color
                     mode_colors = get_mode_colors()
+
+                    # Debug: verify customdata
+                    print(f"Adding trace with customdata shape: {original_indices.shape}, range: {original_indices.min()}-{original_indices.max()}")
+
+                    # Convert to list of lists for JSON serialization
+                    customdata_list = [[int(idx)] for idx in original_indices]
+                    print(f"First 3 customdata entries: {customdata_list[:3]}")
 
                     # Add trace
                     fig.add_trace(go.Scatter(
@@ -3033,7 +3194,8 @@ def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode=
                         line=dict(color=mode_colors.get(mode, '#000000'), width=2),
                         marker=dict(size=8),
                         connectgaps=False,
-                        hovertemplate=f'<b>Time:</b> %{{x:.2f}} UTC<br><b>{prop_info["display_name"]}:</b> %{{y:.{prop_info["decimals"]}f}}<extra></extra>'
+                        customdata=customdata_list,
+                        hovertemplate=f'<b>Time:</b> %{{x:.2f}} UTC<br><b>Mode:</b> {mode.capitalize()}<br><b>{prop_info["display_name"]}:</b> %{{y:.{prop_info["decimals"]}f}}<extra></extra>'
                     ))
 
             if not any_valid_data:
@@ -3100,7 +3262,7 @@ def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode=
                 tickformat=f'.{prop_info["decimals"]}f'
             ),
             height=800,
-            hovermode='x unified',
+            hovermode='closest',  # Show only the hovered point, not all traces at that x-position
             showlegend=True if has_wavelength else False,
             legend=dict(
                 title=legend_title,
@@ -3111,8 +3273,40 @@ def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode=
                 bgcolor="rgba(255, 255, 255, 0.8)",
                 bordercolor="Black",
                 borderwidth=1
-            ) if has_wavelength else None
+            ) if has_wavelength else None,
+            uirevision='time-plot'  # Preserve UI state (trace visibility, zoom) across updates
         )
+
+        # Add single highlight marker if a point is selected
+        if highlight_time_index is not None and highlight_y_value is not None and any_valid_data:
+            try:
+                # Get the time value at the highlighted index
+                time_data = data_dict['rsp_time']
+                if time_data.ndim > 1:
+                    time_data = time_data.flatten()
+
+                if highlight_time_index < len(time_data):
+                    highlight_time = time_data[highlight_time_index]
+
+                    # Add single highlight marker at the clicked point
+                    fig.add_trace(go.Scatter(
+                        x=[highlight_time],
+                        y=[highlight_y_value],
+                        mode='markers',
+                        marker=dict(
+                            size=16,
+                            color='red',
+                            symbol='circle',
+                            line=dict(color='white', width=2)
+                        ),
+                        name='Selected Point',
+                        showlegend=True,
+                        hovertemplate='<b>Selected</b><br>Time: %{x:.2f} UTC<br>Value: %{y:.5f}<extra></extra>'
+                    ))
+            except Exception as e:
+                print(f"Warning: Could not add highlight marker: {e}")
+                import traceback
+                traceback.print_exc()
 
         return fig
 
@@ -4326,6 +4520,7 @@ def run_app(initial_file_path, directory_path):
             'default_var': default_var
         }),
         dcc.Store(id='clicked-point-store'),
+        dcc.Store(id='time-plot-clicked-point-store'),
         dcc.Store(id='applied-cost-value', data=default_cost_value),
 
         # Page header
@@ -4849,6 +5044,35 @@ def run_app(initial_file_path, directory_path):
 
                     # Warning message when only one file has time data
                     html.Div(id='aod-time-warning', style={'textAlign': 'center', 'color': '#e67e22', 'marginTop': '10px'}),
+
+                    # Properties table for clicked time point
+                    html.Div([
+                        html.H3("Selected Time Point Properties", style={
+                            'margin': '20px 0 15px 0',
+                            'color': '#34495e',
+                            'fontSize': '18px',
+                            'textDecoration': 'underline',
+                            'textAlign': 'center'
+                        }),
+                        html.Div(id='time-plot-click-info', style={
+                            'marginBottom': '15px',
+                            'fontSize': '14px',
+                            'textAlign': 'center'
+                        }),
+                        html.Div(id='time-plot-properties-table', style={
+                            'maxHeight': '400px',
+                            'overflowY': 'auto'
+                        }),
+                    ], id='time-plot-properties-container', style={
+                        'padding': '15px',
+                        'border': '1px solid #bdc3c7',
+                        'borderRadius': '5px',
+                        'backgroundColor': '#ffffff',
+                        'marginTop': '20px',
+                        'maxWidth': '1200px',
+                        'margin': '20px auto',
+                        'display': 'none'  # Hidden until point clicked
+                    }),
                 ], id='plot-aod-time', style={'display': 'none'}),
 
             ], style={
@@ -5633,10 +5857,11 @@ def run_app(initial_file_path, directory_path):
          Input('individual-analysis-mode', 'value'),
          Input('plot-type-selector', 'value'),
          Input('property-time-selector', 'value'),
-         Input('applied-cost-value', 'data')],
+         Input('applied-cost-value', 'data'),
+         Input('time-plot-clicked-point-store', 'data')],
         prevent_initial_call=True
     )
-    def update_aod_time_plots(file_path_1, file_path_2, analysis_mode, active_tab, selected_property, max_cost):
+    def update_aod_time_plots(file_path_1, file_path_2, analysis_mode, active_tab, selected_property, max_cost, clicked_point_data):
         print(f"Doing callback: update_aod_time_plots with property={selected_property}")
         """
         Callback for Property vs Time plot for airborne/RSP data.
@@ -5652,6 +5877,15 @@ def run_app(initial_file_path, directory_path):
             parts = selected_property.split('|')
             property_name = parts[0]
             mode = parts[1]
+
+        # Extract highlight info from clicked point data
+        highlight_time_index = None
+        highlight_y_value = None
+        if clicked_point_data and 'time_index' in clicked_point_data:
+            highlight_time_index = clicked_point_data['time_index']
+            highlight_y_value = clicked_point_data.get('y_value')
+            print(f"Highlighting time index: {highlight_time_index}, y_value: {highlight_y_value}")
+
         empty_fig = go.Figure()
 
         if active_tab != 'aod_time':
@@ -5700,7 +5934,10 @@ def run_app(initial_file_path, directory_path):
                 if 'rsp_time' in data_dict_1:
                     has_time_1 = True
                     filename1 = os.path.basename(file_path_1)
-                    fig1 = create_property_vs_time_plot(data_dict_1, property_name=property_name, mode=mode, title_suffix=f"File 1: {filename1}", max_cost=max_cost)
+                    # Only highlight if this plot was clicked
+                    highlight_idx_1 = highlight_time_index if (clicked_point_data and clicked_point_data.get('source_plot') == 'plot-1') else None
+                    highlight_y_1 = highlight_y_value if (clicked_point_data and clicked_point_data.get('source_plot') == 'plot-1') else None
+                    fig1 = create_property_vs_time_plot(data_dict_1, property_name=property_name, mode=mode, title_suffix=f"File 1: {filename1}", max_cost=max_cost, highlight_time_index=highlight_idx_1, highlight_y_value=highlight_y_1)
                 else:
                     fig1 = go.Figure()
                     fig1.add_annotation(
@@ -5728,7 +5965,10 @@ def run_app(initial_file_path, directory_path):
                 if 'rsp_time' in data_dict_2:
                     has_time_2 = True
                     filename2 = os.path.basename(file_path_2)
-                    fig2 = create_property_vs_time_plot(data_dict_2, property_name=property_name, mode=mode, title_suffix=f"File 2: {filename2}", max_cost=max_cost)
+                    # Only highlight if this plot was clicked
+                    highlight_idx_2 = highlight_time_index if (clicked_point_data and clicked_point_data.get('source_plot') == 'plot-2') else None
+                    highlight_y_2 = highlight_y_value if (clicked_point_data and clicked_point_data.get('source_plot') == 'plot-2') else None
+                    fig2 = create_property_vs_time_plot(data_dict_2, property_name=property_name, mode=mode, title_suffix=f"File 2: {filename2}", max_cost=max_cost, highlight_time_index=highlight_idx_2, highlight_y_value=highlight_y_2)
                 else:
                     fig2 = go.Figure()
                     fig2.add_annotation(
@@ -5839,13 +6079,212 @@ def run_app(initial_file_path, directory_path):
                 )
 
             # Create the property vs time plot
-            single_fig = create_property_vs_time_plot(data_dict, property_name=property_name, mode=mode, max_cost=max_cost)
+            single_fig = create_property_vs_time_plot(data_dict, property_name=property_name, mode=mode, max_cost=max_cost, highlight_time_index=highlight_time_index, highlight_y_value=highlight_y_value)
             return (
                 {'display': 'block'},
                 {'display': 'none'},
                 single_fig, empty_fig, empty_fig,
                 ""
             )
+
+    # ---------------------------------------------------
+    # TIME PLOT CLICK HANDLER CALLBACK
+    #   -Handle clicks on Property vs Time plots
+    #   -Display properties table for clicked time point
+    # ---------------------------------------------------
+    @app.callback(
+        [Output('time-plot-clicked-point-store', 'data'),
+         Output('time-plot-click-info', 'children'),
+         Output('time-plot-properties-table', 'children'),
+         Output('time-plot-properties-container', 'style')],
+        [Input('aod-time-plot-single', 'clickData'),
+         Input('aod-time-plot-1', 'clickData'),
+         Input('aod-time-plot-2', 'clickData'),
+         Input('plot-type-selector', 'value')],
+        [State('file-selector', 'value'),
+         State('individual-file-selector-2', 'value'),
+         State('individual-analysis-mode', 'value'),
+         State('time-plot-clicked-point-store', 'data')],
+        prevent_initial_call=True
+    )
+    def handle_time_plot_click(clickData_single, clickData_1, clickData_2,
+                               active_tab, file_path_1, file_path_2,
+                               analysis_mode, stored_click_data):
+        """
+        Handle clicks on Property vs Time plots.
+        Extracts time point data and displays properties table.
+        """
+        print("Doing callback: handle_time_plot_click")
+        ctx = callback_context
+        trigger_id = ctx.triggered[0]['prop_id'].split('.')[0] if ctx.triggered else None
+
+        # Clear click state when switching away from aod_time tab
+        if trigger_id == 'plot-type-selector' and active_tab != 'aod_time':
+            return None, "", "", {'display': 'none'}
+
+        # Determine which plot was clicked and get file path
+        clicked_data = None
+        source_plot = None
+        file_path = None
+
+        if trigger_id == 'aod-time-plot-single' and clickData_single:
+            clicked_data = clickData_single
+            source_plot = 'single'
+            file_path = file_path_1
+        elif trigger_id == 'aod-time-plot-1' and clickData_1:
+            clicked_data = clickData_1
+            source_plot = 'plot-1'
+            file_path = file_path_1
+        elif trigger_id == 'aod-time-plot-2' and clickData_2:
+            clicked_data = clickData_2
+            source_plot = 'plot-2'
+            file_path = file_path_2
+        else:
+            # No new click, preserve existing state if available
+            if stored_click_data:
+                return stored_click_data, no_update, no_update, no_update
+            else:
+                return None, "", "", {'display': 'none'}
+
+        # Extract click information
+        try:
+            point_data = clicked_data['points'][0]
+            time_value = point_data['x']
+            y_value = point_data['y']  # Get the y-value of the clicked point
+
+            # Debug: print available keys and customdata if present
+            print(f"Point data keys: {point_data.keys()}")
+            if 'customdata' in point_data:
+                print(f"customdata value: {point_data['customdata']}, type: {type(point_data['customdata'])}")
+
+            # Get original index from customdata (with fallback to pointNumber)
+            if 'customdata' in point_data:
+                # customdata is a 2D array, extract first element
+                customdata_value = point_data['customdata']
+                if isinstance(customdata_value, (list, tuple, np.ndarray)):
+                    time_index = int(customdata_value[0])
+                else:
+                    time_index = int(customdata_value)
+                print(f"Using customdata: time_index = {time_index}")
+            elif 'pointNumber' in point_data:
+                time_index = int(point_data['pointNumber'])
+                print(f"WARNING: customdata not found, using pointNumber: {time_index}")
+                print(f"This may not work correctly with cost filtering applied!")
+            else:
+                raise ValueError("Neither customdata nor pointNumber found in click data")
+
+            # Load data for the clicked file
+            cache_entry = get_cached_data(file_path)
+            data_dict = cache_entry['data_dict']
+
+            # Helper function to extract scalar from potentially multi-dimensional data
+            def extract_scalar(value):
+                """Extract first scalar value from potentially nested array"""
+                if value is None:
+                    return None
+                # Keep extracting first element until we get a scalar
+                while isinstance(value, (np.ndarray, list)) and len(value) > 0:
+                    value = value[0] if hasattr(value, '__len__') else value
+                    if np.ndim(value) == 0:  # Scalar
+                        break
+                return float(value) if value is not None and np.isfinite(value) else None
+
+            # Extract all data for this time point
+            lat = extract_scalar(data_dict['latitude'][time_index])
+            lon = extract_scalar(data_dict['longitude'][time_index])
+
+            # Handle viewing angles
+            if 'sensor_zenith' in data_dict:
+                vza = extract_scalar(data_dict['sensor_zenith'][time_index])
+                vza_deg = np.degrees(vza) if vza is not None else None
+            else:
+                vza_deg = None
+
+            # SZA (stored as cosine, convert to degrees)
+            if 'sza' in data_dict:
+                sza = extract_scalar(data_dict['sza'][time_index])
+                sza_deg = np.degrees(np.arccos(sza)) if sza is not None and abs(sza) <= 1.0 else None
+            else:
+                sza_deg = None
+
+            # RAA
+            if 'raa' in data_dict:
+                raa = extract_scalar(data_dict['raa'][time_index])
+            else:
+                raa = None
+
+            # Cost function
+            if 'cost_function' in data_dict:
+                cost = extract_scalar(data_dict['cost_function'][time_index])
+            else:
+                cost = None
+
+            # Store click data
+            click_data_to_store = {
+                'time_index': time_index,
+                'time_value': float(time_value),
+                'y_value': float(y_value),  # Store the y-value of clicked point
+                'file_path': file_path,
+                'source_plot': source_plot
+            }
+
+            # Create click info display
+            click_info_parts = [
+                html.Strong("Time: "), f"{time_value:.2f} UTC",
+                html.Br(),
+                html.Strong("Location: "), f"Lat {lat:.4f}°, Lon {lon:.4f}°",
+                html.Br()
+            ]
+
+            if vza_deg is not None and np.isfinite(vza_deg):
+                click_info_parts.extend([
+                    html.Strong("Viewing Zenith Angle: "), f"{vza_deg:.2f}°",
+                    html.Br()
+                ])
+
+            if sza_deg is not None and np.isfinite(sza_deg):
+                click_info_parts.extend([
+                    html.Strong("Solar Zenith Angle: "), f"{sza_deg:.2f}°",
+                    html.Br()
+                ])
+
+            if raa is not None and np.isfinite(raa):
+                click_info_parts.extend([
+                    html.Strong("Relative Azimuth Angle: "), f"{raa:.2f}°",
+                    html.Br()
+                ])
+
+            if cost is not None and np.isfinite(cost):
+                click_info_parts.extend([
+                    html.Strong("Cost Function: "), f"{cost:.3f}",
+                ])
+
+            click_info = html.Div(click_info_parts)
+
+            # Create properties table using new helper function
+            properties_table = create_time_point_properties_table(
+                data_dict, time_index, source_plot, file_path
+            )
+
+            # Show container
+            container_style = {
+                'padding': '15px',
+                'border': '1px solid #bdc3c7',
+                'borderRadius': '5px',
+                'backgroundColor': '#ffffff',
+                'marginTop': '20px',
+                'maxWidth': '1200px',
+                'margin': '20px auto',
+                'display': 'block'
+            }
+
+            return click_data_to_store, click_info, properties_table, container_style
+
+        except Exception as e:
+            print(f"Error handling time plot click: {e}")
+            import traceback
+            traceback.print_exc()
+            return None, f"Error: {str(e)}", "", {'display': 'none'}
 
     # ---------------------------------------------------
     # AOD HISTOGRAM CALLBACK (4 of 18 total)
@@ -6869,7 +7308,9 @@ def run_app(initial_file_path, directory_path):
             return no_update
 
     # Run the app
-    app.run_server(debug=True, port=8050)
+    # Modified the below from run_server to run.app for compatibility
+    # app.run_server(debug=True, port=8050)
+    app.run(debug=True, port=8050)
 
 
 # Run the application

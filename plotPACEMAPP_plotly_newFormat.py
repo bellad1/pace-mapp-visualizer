@@ -6681,7 +6681,8 @@ def run_app(initial_file_path, directory_path):
          Output('cost-input', 'value'),
          Output('clicked-point-store', 'data'),
          Output('applied-cost-value', 'data'),
-         Output('cost-filter-label', 'children')],
+         Output('cost-filter-label', 'children'),
+         Output('plot-type-selector', 'value')],
         [Input('file-selector', 'value'),
          Input('individual-analysis-mode', 'value'),
          Input('individual-file-selector-2', 'value')],
@@ -6701,7 +6702,8 @@ def run_app(initial_file_path, directory_path):
                 None,  # cost value
                 None,  # clicked point
                 None,  # applied cost value
-                "Cost Filter (Please select a file first):"  # label
+                "Cost Filter (Please select a file first):",  # label
+                'about'  # plot-type-selector: stay on About page
             )
 
         # Read new file
@@ -6712,8 +6714,8 @@ def run_app(initial_file_path, directory_path):
             # Get new max cost value
             new_max_cost_value = np.nanmax(new_data_dict['cost_function'])
             new_min_cost_value = np.nanmin(new_data_dict['cost_function'])
-            # new_default_cost_value = min(0.7, new_max_cost_value)
-            new_default_cost_value = min(default_cost, new_max_cost_value)
+            # Use default_cost if it's >= min_cost, otherwise use min_cost (ensures data is visible)
+            new_default_cost_value = max(new_min_cost_value, min(default_cost, new_max_cost_value))
 
             # Create new dropdown options
             new_dropdown_options = create_dropdown_options(new_sorted_variables, new_display_names, new_variable_metadata)
@@ -6755,6 +6757,7 @@ def run_app(initial_file_path, directory_path):
                 None,
                 new_default_cost_value,
                 f"Cost Filter (Default={default_cost:.2f}/Range=[{new_min_cost_value:.3f}, {new_max_cost_value:.3f}]):",
+                'scatter'  # plot-type-selector: auto-navigate to Scatter plot
             )
 
         except Exception as e:

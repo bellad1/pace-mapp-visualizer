@@ -34,7 +34,8 @@ def get_cached_data(file_path):
         file_format = detect_file_format(file_path)
         print(f"Detected file format: {file_format}")
 
-        data_dict, sorted_vars, display_names, var_metadata = load_retrieval_file(file_path)
+        data_dict, sorted_vars, display_names, var_metadata = \
+            load_retrieval_file(file_path)
 
         _data_cache[file_path] = {
             'data_dict': data_dict,
@@ -105,6 +106,80 @@ def find_nearest_point(lats, lons, target_lat, target_lon):
     closest_idx = np.argmin(distances)
 
     return closest_idx
+
+
+def match_rsp_to_pace(rsp_data_dict, pace_data_dict):
+    """
+    For each RSP point, find nearest PACE pixel with spatial distance matching.
+
+    Args:
+        rsp_data_dict: Filtered RSP data dictionary (1D)
+        pace_data_dict: Filtered PACE data dictionary (2D)
+
+    Returns:
+        dict: {
+            'rsp_indices': np.array of RSP point indices,
+            'pace_rows': np.array of matched PACE row indices,
+            'pace_cols': np.array of matched PACE column indices,
+            'distances_km': np.array of distances in km,
+            'rsp_lats': np.array of RSP latitudes,
+            'rsp_lons': np.array of RSP longitudes,
+            'pace_lats': np.array of matched PACE latitudes,
+            'pace_lons': np.array of matched PACE longitudes
+        }
+    """
+    # Get RSP coordinates (1D arrays)
+    rsp_lats = rsp_data_dict['latitude'].flatten()
+    rsp_lons = rsp_data_dict['longitude'].flatten()
+
+    # Get PACE coordinates (2D arrays)
+    pace_lats_2d = pace_data_dict['latitude']
+    pace_lons_2d = pace_data_dict['longitude']
+
+    # Filter valid PACE points (remove NaN)
+    valid_mask = np.isfinite(pace_lats_2d) & np.isfinite(pace_lons_2d)
+    pace_lats_flat = pace_lats_2d[valid_mask]
+    pace_lons_flat = pace_lons_2d[valid_mask]
+    pace_rows, pace_cols = np.where(valid_mask)
+
+    # Initialize output arrays
+    n_rsp = len(rsp_lats)
+    matched_pace_rows = np.zeros(n_rsp, dtype=int)
+    matched_pace_cols = np.zeros(n_rsp, dtype=int)
+    distances_km = np.zeros(n_rsp)
+    matched_pace_lats = np.zeros(n_rsp)
+    matched_pace_lons = np.zeros(n_rsp)
+
+    # For each RSP point, find nearest PACE pixel
+    for i in range(n_rsp):
+        if not (np.isfinite(rsp_lats[i]) and np.isfinite(rsp_lons[i])):
+            matched_pace_rows[i] = -1
+            matched_pace_cols[i] = -1
+            distances_km[i] = np.nan
+            continue
+
+        # Calculate Euclidean distance (acceptable for small spatial scales?)
+        distances_deg = np.sqrt((pace_lats_flat - rsp_lats[i])**2 +
+                                (pace_lons_flat - rsp_lons[i])**2)
+        nearest_idx = np.argmin(distances_deg)
+
+        # Store results
+        matched_pace_rows[i] = pace_rows[nearest_idx]
+        matched_pace_cols[i] = pace_cols[nearest_idx]
+        distances_km[i] = distances_deg[nearest_idx] * 111  # Degrees to km
+        matched_pace_lats[i] = pace_lats_flat[nearest_idx]
+        matched_pace_lons[i] = pace_lons_flat[nearest_idx]
+
+    return {
+        'rsp_indices': np.arange(n_rsp),
+        'pace_rows': matched_pace_rows,
+        'pace_cols': matched_pace_cols,
+        'distances_km': distances_km,
+        'rsp_lats': rsp_lats,
+        'rsp_lons': rsp_lons,
+        'pace_lats': matched_pace_lats,
+        'pace_lons': matched_pace_lons
+    }
 
 
 def determine_retrieval_scenario(file_path):
@@ -207,6 +282,40 @@ def detect_file_format(file_path):
         return 'RSP'
     else:
         return 'HARP2'
+
+
+def detect_file_types(data_dict_1, data_dict_2):
+    """
+    Detect which file is RSP (1D) vs PACE (2D) based on original_shape.
+
+    Args:
+        data_dict_1: First data dictionary
+        data_dict_2: Second data dictionary
+
+    Returns:
+        dict: {
+            'valid': bool,  # True if one RSP and one PACE
+            'rsp_file': int (1 or 2),  # Which file is RSP
+            'pace_file': int (1 or 2),  # Which file is PACE
+            'error': str or None  # Error message if invalid
+        }
+    """
+    shape1 = data_dict_1['original_shape']
+    shape2 = data_dict_2['original_shape']
+
+    is_1d_file1 = len(shape1) == 1
+    is_1d_file2 = len(shape2) == 1
+
+    if is_1d_file1 and not is_1d_file2:
+        return {'valid': True, 'rsp_file': 1, 'pace_file': 2, 'error': None}
+    elif is_1d_file2 and not is_1d_file1:
+        return {'valid': True, 'rsp_file': 2, 'pace_file': 1, 'error': None}
+    elif is_1d_file1 and is_1d_file2:
+        return {'valid': False, 'rsp_file': None, 'pace_file': None,
+                'error': 'Both files are 1D (RSP). Image/Swath mode requires one RSP and one PACE file.'}
+    else:
+        return {'valid': False, 'rsp_file': None, 'pace_file': None,
+                'error': 'Both files are 2D (PACE). Image/Swath mode requires one RSP and one PACE file.'}
 
 
 def get_reference_wavelength(filtered_data):
@@ -363,11 +472,19 @@ def create_properties_table_compact(filtered_data, selected_row, selected_col, s
         # Get selected property value
         selected_val = None
         if selected_property in filtered_data:
-            prop_data = filtered_data[selected_property]
-            if is_1d:
-                selected_val = extract_scalar(prop_data[selected_row])
-            else:
+            # For 2D data, check for _2d version first
+            if not is_1d and f"{selected_property}_2d" in filtered_data:
+                prop_data = filtered_data[f"{selected_property}_2d"]
                 selected_val = extract_scalar(prop_data[selected_row, selected_col])
+            else:
+                prop_data = filtered_data[selected_property]
+                if is_1d:
+                    selected_val = extract_scalar(prop_data[selected_row])
+                else:
+                    # Fallback: use flat indexing
+                    original_shape = filtered_data.get('original_shape', (1, 1))
+                    flat_idx = selected_row * original_shape[1] + selected_col
+                    selected_val = extract_scalar(prop_data.flatten()[flat_idx])
     except Exception as e:
         print(f"Error extracting metadata: {e}")
         import traceback
@@ -477,15 +594,21 @@ def create_properties_table_compact(filtered_data, selected_row, selected_col, s
             if prop_key in filtered_data:
                 try:
                     # Handle both 1D (RSP) and 2D (HARP2) indexing
-                    prop_data = filtered_data[prop_key]
-                    if prop_data.ndim == 1:
-                        # 1D data (RSP): use selected_row as index
-                        value = prop_data[selected_row]
-                    elif prop_data.ndim == 2:
-                        # 2D data (HARP2): use [row, col] indexing
+                    # Check for _2d version first for PACE files
+                    prop_key_2d = f"{prop_key}_2d"
+                    if not is_1d and prop_key_2d in filtered_data:
+                        prop_data = filtered_data[prop_key_2d]
                         value = prop_data[selected_row, selected_col]
                     else:
-                        value = np.nan
+                        prop_data = filtered_data[prop_key]
+                        if prop_data.ndim == 1:
+                            # 1D data (RSP): use selected_row as index
+                            value = prop_data[selected_row]
+                        elif prop_data.ndim == 2:
+                            # 2D data (HARP2): use [row, col] indexing
+                            value = prop_data[selected_row, selected_col]
+                        else:
+                            value = np.nan
 
                     if np.isfinite(value):
                         mode_values[mode] = f"{value:.3f}"
@@ -763,7 +886,9 @@ def get_wavelength_mapping_rsp():
         (410, 'RSP', num_angles),
         (469, 'RSP', num_angles),
         (670, 'RSP', num_angles),
-        (864, 'RSP', num_angles)
+        (864, 'RSP', num_angles),
+        (1594, 'RSP', num_angles),
+        (2264, 'RSP', num_angles)
     ]
 
     return wavelength_mapping
@@ -2462,6 +2587,130 @@ def create_scatter_plot_only(data_dict, selected_property, original_indices, cli
     return fig
 
 
+def create_image_swath_scatter(pace_data_dict, rsp_data_dict, matching_results, selected_property):
+    """
+    Create scatter plot with PACE as background heatmap and RSP as overlaid line/markers.
+    Uses shared color scale for direct comparison. Matches styling of existing scatter plots.
+
+    Args:
+        pace_data_dict: PACE data dictionary (2D)
+        rsp_data_dict: RSP data dictionary (1D)
+        matching_results: Output from match_rsp_to_pace()
+        selected_property: Property variable name to visualize
+
+    Returns:
+        go.Figure: Plotly figure with PACE background + RSP overlay
+    """
+    fig = go.Figure()
+
+    # Get data
+    pace_lats = pace_data_dict['latitude'].flatten()
+    pace_lons = pace_data_dict['longitude'].flatten()
+    pace_prop = pace_data_dict[selected_property].flatten()
+    rsp_prop = rsp_data_dict[selected_property].flatten()
+
+    # Calculate shared color scale from combined data
+    pace_valid = np.isfinite(pace_lats) & np.isfinite(pace_lons) & np.isfinite(pace_prop)
+    rsp_valid = np.isfinite(matching_results['rsp_lats']) & np.isfinite(rsp_prop)
+    all_values = np.concatenate([pace_prop[pace_valid], rsp_prop[rsp_valid]])
+    vmin, vmax = np.nanmin(all_values), np.nanmax(all_values)
+
+    # Clean up colorbar label
+    wavelengths = pace_data_dict.get('wavelengths', [])
+    colorbar_title = selected_property.replace('_', ' ').title()
+    for wl in wavelengths:
+        wl_str = str(int(wl))
+        colorbar_title = colorbar_title.replace(f'{wl_str}', f'- {wl_str} nm')
+
+    # Apply standard replacements
+    replacements = {
+        'Ssa': 'SSA',
+        'Reff': 'Effective Radius',
+        'Veff': 'Effective Variance',
+        'Fine': '(Fine Mode)',
+        'Coarse': '(Coarse Mode)',
+        'Dust': '(Dust)',
+        'Sea Salt': '(Sea Salt)',
+        'Total': '(Total)'
+    }
+    for old, new in replacements.items():
+        colorbar_title = colorbar_title.replace(old, new)
+
+    # PACE background (semi-transparent) - using Scattermap for geographic features
+    fig.add_trace(go.Scattermap(
+        lat=pace_lats[pace_valid],
+        lon=pace_lons[pace_valid],
+        mode='markers',
+        marker=dict(
+            size=3,
+            color=pace_prop[pace_valid],
+            colorscale='Viridis',
+            cmin=vmin,
+            cmax=vmax,
+            opacity=0.5,
+            colorbar=dict(
+                title=colorbar_title,
+                x=0.5,
+                y=0.99,
+                lenmode="fraction",
+                len=0.95,
+                orientation='h',
+                yanchor='bottom',
+                title_side='top',
+                thickness=15,
+                outlinewidth=1,
+                outlinecolor='black'
+            ),
+            showscale=True
+        ),
+        name='PACE (all points)',
+        hovertemplate='PACE<br>Lat: %{lat:.4f}<br>Lon: %{lon:.4f}<br>Value: %{marker.color:.5f}<extra></extra>',
+        showlegend=False
+    ))
+
+    # RSP overlay (opaque line + markers)
+    fig.add_trace(go.Scattermap(
+        lat=matching_results['rsp_lats'],
+        lon=matching_results['rsp_lons'],
+        mode='lines+markers',
+        marker=dict(
+            size=10,
+            color=rsp_prop,
+            colorscale='Viridis',
+            cmin=vmin,
+            cmax=vmax,
+            opacity=1.0
+        ),
+        line=dict(color='rgba(255,255,255,0.7)', width=3),
+        name='RSP swath',
+        hovertemplate='RSP<br>Lat: %{lat:.4f}<br>Lon: %{lon:.4f}<br>Value: %{marker.color:.5f}<extra></extra>',
+        showlegend=True
+    ))
+
+    # Calculate map center from combined data
+    all_lats = np.concatenate([pace_lats[pace_valid], matching_results['rsp_lats']])
+    all_lons = np.concatenate([pace_lons[pace_valid], matching_results['rsp_lons']])
+    center_lat = np.mean(all_lats) if len(all_lats) > 0 else 34
+    center_lon = np.mean(all_lons) if len(all_lons) > 0 else -121
+
+    # Update layout to match existing scatter plot style
+    fig.update_layout(
+        uirevision="preserve-zoom",
+        title="",
+        map=dict(
+            style="open-street-map",
+            center=dict(lat=center_lat, lon=center_lon),
+            zoom=4.0
+        ),
+        margin=dict(l=0, r=0, t=30, b=0),
+        autosize=True,
+        height=700,
+        showlegend=True
+    )
+
+    return fig
+
+
 def create_combined_intensity_dolp_plot(intensity_data, dolp_data, wavelengths, wl_colors, file_format='HARP2'):
     """
     Create a single plot with intensity and DoLP as subplots
@@ -3326,6 +3575,96 @@ def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode=
         )
         fig.update_layout(title="Property vs Time - Error")
         return fig
+
+
+def create_property_vs_index_plot(data_dict, matching_results, selected_property,
+                                   dataset_label, is_rsp=True):
+    """
+    Create Property vs Point Index plot for Image/Swath comparison.
+
+    Args:
+        data_dict: RSP or PACE data dictionary
+        matching_results: Output from match_rsp_to_pace()
+        selected_property: Property variable name
+        dataset_label: 'RSP' or 'PACE' for labeling
+        is_rsp: True if RSP data, False if PACE data
+
+    Returns:
+        go.Figure: Plotly figure with property values vs point index
+    """
+    fig = go.Figure()
+
+    # Extract property values at matched points
+    if is_rsp:
+        # RSP: 1D indexing
+        prop_values = data_dict[selected_property].flatten()[matching_results['rsp_indices']]
+        lats = matching_results['rsp_lats']
+        lons = matching_results['rsp_lons']
+        # Store RSP index for clicking
+        customdata = [[int(idx)] for idx in matching_results['rsp_indices']]
+    else:
+        # PACE: 2D indexing - use _2d version if available
+        prop_key_2d = f"{selected_property}_2d"
+        print(f"PACE property extraction: looking for '{prop_key_2d}' in data_dict")
+        print(f"  Available keys with selected_property: {[k for k in data_dict.keys() if selected_property in k]}")
+
+        if prop_key_2d in data_dict:
+            # Use the 2D version directly
+            print(f"  Found {prop_key_2d}, using 2D indexing")
+            prop_2d = data_dict[prop_key_2d]
+            print(f"  prop_2d shape: {prop_2d.shape}")
+            print(f"  Number of matched points: {len(matching_results['pace_rows'])}")
+            prop_values = prop_2d[matching_results['pace_rows'], matching_results['pace_cols']]
+        else:
+            # Fallback: use flat indexing
+            print(f"  {prop_key_2d} not found, using flat indexing")
+            prop_flat = data_dict[selected_property].flatten()
+            original_shape = data_dict.get('original_shape', (1, len(prop_flat)))
+            flat_indices = matching_results['pace_rows'] * original_shape[1] + matching_results['pace_cols']
+            prop_values = prop_flat[flat_indices]
+
+        lats = matching_results['pace_lats']
+        lons = matching_results['pace_lons']
+        # Store PACE (row, col) for reference
+        customdata = [[int(r), int(c)] for r, c in zip(matching_results['pace_rows'],
+                                                        matching_results['pace_cols'])]
+
+    # X-axis: point index (0, 1, 2, ...)
+    point_indices = np.arange(len(prop_values))
+
+    # Debug output
+    print(f"create_property_vs_index_plot - {dataset_label}:")
+    print(f"  Number of points: {len(prop_values)}")
+    print(f"  Property values range: {np.nanmin(prop_values):.5f} to {np.nanmax(prop_values):.5f}")
+    print(f"  NaN count: {np.sum(~np.isfinite(prop_values))}")
+
+    # Add trace
+    fig.add_trace(go.Scatter(
+        x=point_indices,
+        y=prop_values,
+        mode='lines+markers',
+        marker=dict(size=8, color=prop_values, colorscale='Viridis'),
+        line=dict(width=2),
+        customdata=customdata,
+        hovertemplate=(
+            f'{dataset_label}<br>' +
+            'Index: %{x}<br>' +
+            f'{selected_property}: %{{y:.5f}}<br>' +
+            '<extra></extra>'
+        )
+    ))
+
+    fig.update_layout(
+        title=f"{dataset_label} - {selected_property.replace('_', ' ').title()} vs Point Index",
+        xaxis_title="Point Index",
+        yaxis_title=selected_property.replace('_', ' ').title(),
+        height=600,
+        hovermode='closest'
+    )
+
+    return fig
+
+
 def create_polarized_reflectance_comparison_plot(intensity_data_1, dolp_data_1,
                                                  intensity_data_2, dolp_data_2,
                                                  wavelengths, wl_colors,
@@ -5075,6 +5414,80 @@ def run_app(initial_file_path, directory_path):
                     }),
                 ], id='plot-aod-time', style={'display': 'none'}),
 
+                # Image/Swath Comparison plot container
+                html.Div([
+                    # File type labels
+                    html.Div(id='image-swath-file-labels', style={
+                        'textAlign': 'center',
+                        'marginBottom': '20px',
+                        'padding': '10px',
+                        'backgroundColor': '#f8f9fa',
+                        'borderRadius': '5px'
+                    }),
+
+                    # Scatter plot (PACE heatmap + RSP overlay)
+                    html.Div([
+                        # html.H4("Spatial Distribution", style={
+                        #     'textAlign': 'center',
+                        #     'marginBottom': '15px'
+                        # }),
+                        dcc.Graph(id='image-swath-scatter', style={'height': '700px'})
+                    ], style={'marginBottom': '30px'}),
+
+                    # Property vs Index plots (side-by-side)
+                    html.Div([
+                        html.Div([
+                            html.H4("", id='rsp-index-header', style={'textAlign': 'center'}),
+                            dcc.Graph(id='property-index-plot-rsp', style={'height': '600px'})
+                        ], style={'width': '49%', 'display': 'inline-block', 'verticalAlign': 'top'}),
+
+                        html.Div([
+                            html.H4("", id='pace-index-header', style={'textAlign': 'center'}),
+                            dcc.Graph(id='property-index-plot-pace', style={'height': '600px'})
+                        ], style={'width': '49%', 'display': 'inline-block', 'verticalAlign': 'top', 'marginLeft': '2%'}),
+                    ], style={'marginBottom': '30px'}),
+
+                    # Comparison panel (shown on click)
+                    html.Div([
+                        html.H5("Point Comparison Details", style={'textAlign': 'center', 'marginBottom': '15px'}),
+                        html.Div(id='image-swath-comparison-info')
+                    ], id='image-swath-comparison-container', style={
+                        'display': 'none',
+                        'border': '2px solid #bdc3c7',
+                        'borderRadius': '5px',
+                        'padding': '20px',
+                        'marginBottom': '30px',
+                        'backgroundColor': '#ffffff'
+                    }),
+
+                    # Intensity plots (shown on click)
+                    html.Div([
+                        html.Div([
+                            html.H4("", id='rsp-intensity-header', style={'textAlign': 'center'}),
+                            dcc.Graph(id='intensity-plot-rsp', style={'height': '600px'})
+                        ], style={'width': '49%', 'display': 'inline-block', 'verticalAlign': 'top'}),
+
+                        html.Div([
+                            html.H4("", id='pace-intensity-header', style={'textAlign': 'center'}),
+                            dcc.Graph(id='intensity-plot-pace', style={'height': '600px'})
+                        ], style={'width': '49%', 'display': 'inline-block', 'verticalAlign': 'top', 'marginLeft': '2%'}),
+                    ], id='image-swath-intensity-container', style={'display': 'none', 'marginBottom': '30px'}),
+
+                    # DoLP plots (shown on click)
+                    html.Div([
+                        html.Div([
+                            html.H4("", id='rsp-dolp-header', style={'textAlign': 'center'}),
+                            dcc.Graph(id='dolp-plot-rsp', style={'height': '600px'})
+                        ], style={'width': '49%', 'display': 'inline-block', 'verticalAlign': 'top'}),
+
+                        html.Div([
+                            html.H4("", id='pace-dolp-header', style={'textAlign': 'center'}),
+                            dcc.Graph(id='dolp-plot-pace', style={'height': '600px'})
+                        ], style={'width': '49%', 'display': 'inline-block', 'verticalAlign': 'top', 'marginLeft': '2%'}),
+                    ], id='image-swath-dolp-container', style={'display': 'none'}),
+
+                ], id='plot-image-swath', style={'display': 'none'}),
+
             ], style={
                 'flex': '0 0 74%'
             }),
@@ -5096,12 +5509,14 @@ def run_app(initial_file_path, directory_path):
     @app.callback(
         Output('plot-type-selector', 'options'),
         [Input('file-selector', 'value'),
-         Input('individual-file-selector-2', 'value')]
+         Input('individual-file-selector-2', 'value'),
+         Input('individual-analysis-mode', 'value')]
     )
-    def update_plot_type_options(file_path_1, file_path_2):
+    def update_plot_type_options(file_path_1, file_path_2, analysis_mode):
         """
-        Dynamically update plot type dropdown options based on file type.
+        Dynamically update plot type dropdown options based on file type and mode.
         Shows "Property vs Time" option only for files with rsp_time data (RSP files).
+        Shows "Image/Swath Comparison" option only in multi-file mode.
         Checks both file selectors for multi-file mode.
         """
         # Base options available for all files
@@ -5132,6 +5547,10 @@ def run_app(initial_file_path, directory_path):
 
         if has_time_data:
             base_options.append({'label': 'Property vs Time', 'value': 'aod_time'})
+
+        # Add Image/Swath Comparison option only in multi-file mode
+        if analysis_mode == 'multiple':
+            base_options.append({'label': 'Image/Swath Comparison', 'value': 'image_swath'})
 
         return base_options
 
@@ -5269,7 +5688,8 @@ def run_app(initial_file_path, directory_path):
          Output('plot-residual', 'style'),
          Output('plot-histogram', 'style'),
          Output('plot-aod-total', 'style'),
-         Output('plot-aod-time', 'style')],
+         Output('plot-aod-time', 'style'),
+         Output('plot-image-swath', 'style')],
         Input('plot-type-selector', 'value')
     )
     def update_plot_visibility(plot_type):
@@ -5282,7 +5702,8 @@ def run_app(initial_file_path, directory_path):
             {'display': 'none'},  # residual
             {'display': 'none'},  # histogram
             {'display': 'none'},  # aod_total
-            {'display': 'none'}   # aod_time
+            {'display': 'none'},  # aod_time
+            {'display': 'none'}   # image_swath
         ]
 
         # Show the selected plot
@@ -5293,7 +5714,8 @@ def run_app(initial_file_path, directory_path):
             'residual': 3,
             'histogram': 4,
             'aod_total': 5,
-            'aod_time': 6
+            'aod_time': 6,
+            'image_swath': 7
         }
 
         if plot_type in plot_map:
@@ -5702,6 +6124,408 @@ def run_app(initial_file_path, directory_path):
             traceback.print_exc()
             error_fig = create_placeholder_figure(f"Error: {str(e)}")
             return [error_fig] * 6 + default_headers + [default_info]
+
+    # ---------------------------------------------------
+    # IMAGE/SWATH COMPARISON CALLBACK
+    # ---------------------------------------------------
+    @app.callback(
+        [Output('image-swath-file-labels', 'children'),
+         Output('image-swath-scatter', 'figure'),
+         Output('property-index-plot-rsp', 'figure'),
+         Output('property-index-plot-pace', 'figure'),
+         Output('rsp-index-header', 'children'),
+         Output('pace-index-header', 'children'),
+         Output('image-swath-comparison-info', 'children'),
+         Output('image-swath-comparison-container', 'style'),
+         Output('intensity-plot-rsp', 'figure'),
+         Output('intensity-plot-pace', 'figure'),
+         Output('dolp-plot-rsp', 'figure'),
+         Output('dolp-plot-pace', 'figure'),
+         Output('image-swath-intensity-container', 'style'),
+         Output('image-swath-dolp-container', 'style'),
+         Output('rsp-intensity-header', 'children'),
+         Output('pace-intensity-header', 'children'),
+         Output('rsp-dolp-header', 'children'),
+         Output('pace-dolp-header', 'children')],
+        [Input('individual-analysis-mode', 'value'),
+         Input('file-selector', 'value'),
+         Input('individual-file-selector-2', 'value'),
+         Input('property-selector', 'value'),
+         Input('applied-cost-value', 'data'),
+         Input('plot-type-selector', 'value'),
+         Input('property-index-plot-rsp', 'clickData')],
+        prevent_initial_call=True
+    )
+    def update_image_swath_comparison(analysis_mode, file_path_1, file_path_2,
+                                      selected_property, max_cost, plot_type,
+                                      clickData):
+        """
+        Main callback for Image/Swath Comparison mode.
+        Matches RSP swath points to PACE image pixels and displays comparison.
+        """
+        print("Doing callback: update_image_swath_comparison")
+
+        # Create empty figures
+        empty_fig = create_placeholder_figure("No data")
+
+        # Default returns
+        default_returns = (
+            "",  # file labels
+            empty_fig,  # scatter
+            empty_fig, empty_fig,  # property vs index plots
+            "", "",  # headers
+            "",  # comparison info
+            {'display': 'none'},  # comparison container
+            empty_fig, empty_fig, empty_fig, empty_fig,  # intensity/dolp plots
+            {'display': 'none'}, {'display': 'none'},  # intensity/dolp containers
+            "", "", "", ""  # intensity/dolp headers
+        )
+
+        # Early returns for invalid states
+        if plot_type != 'image_swath':
+            return default_returns
+
+        if analysis_mode != 'multiple':
+            msg = html.P("Switch to Compare Files mode to use Image/Swath Comparison",
+                         style={'textAlign': 'center', 'color': '#e74c3c', 'fontSize': '16px'})
+            return (msg,) + default_returns[1:]
+
+        if file_path_1 is None or file_path_2 is None:
+            msg = html.P("Please select both files",
+                         style={'textAlign': 'center', 'color': '#e74c3c', 'fontSize': '16px'})
+            return (msg,) + default_returns[1:]
+
+        if selected_property is None:
+            msg = html.P("Please select a property",
+                         style={'textAlign': 'center', 'color': '#e74c3c', 'fontSize': '16px'})
+            return (msg,) + default_returns[1:]
+
+        try:
+            # Load data from cache
+            cached_1 = get_cached_data(file_path_1)
+            cached_2 = get_cached_data(file_path_2)
+
+            data_dict_1 = cached_1['data_dict']
+            data_dict_2 = cached_2['data_dict']
+
+            # Detect file types (RSP vs PACE)
+            file_types = detect_file_types(data_dict_1, data_dict_2)
+
+            if not file_types['valid']:
+                error_msg = html.P(file_types['error'],
+                                   style={'textAlign': 'center', 'color': '#e74c3c', 'fontSize': '14px'})
+                return (error_msg,) + default_returns[1:]
+
+            # Assign RSP and PACE data based on detection
+            if file_types['rsp_file'] == 1:
+                rsp_data_full = data_dict_1
+                pace_data_full = data_dict_2
+                rsp_filename = os.path.basename(file_path_1)
+                pace_filename = os.path.basename(file_path_2)
+            else:
+                rsp_data_full = data_dict_2
+                pace_data_full = data_dict_1
+                rsp_filename = os.path.basename(file_path_2)
+                pace_filename = os.path.basename(file_path_1)
+
+            # Create file labels
+            file_labels = html.Div([
+                html.P([
+                    html.Strong("RSP File: "), rsp_filename,
+                    html.Br(),
+                    html.Strong("PACE File: "), pace_filename
+                ], style={'margin': '0', 'fontSize': '14px'})
+            ])
+
+            # Check if property exists in both
+            if selected_property not in rsp_data_full or selected_property not in pace_data_full:
+                error_msg = html.Div([
+                    file_labels,
+                    html.P(f"Property '{selected_property}' not available in both files",
+                           style={'textAlign': 'center', 'color': '#e74c3c', 'marginTop': '10px'})
+                ])
+                return (error_msg,) + default_returns[1:]
+
+            # Filter both datasets by cost independently
+            rsp_cost_mask = rsp_data_full['cost_function'].flatten() <= max_cost
+            pace_cost_mask = pace_data_full['cost_function'].flatten() <= max_cost
+
+            # Get original shapes for reshaping
+            rsp_shape = rsp_data_full['original_shape']
+            pace_shape = pace_data_full['original_shape']
+
+            # Reshape PACE cost mask to 2D
+            pace_cost_mask_2d = pace_cost_mask.reshape(pace_shape)
+
+            # Apply cost filtering to RSP (1D) - subset the arrays
+            rsp_data = {}
+            rsp_data['latitude'] = rsp_data_full['latitude'].flatten()[rsp_cost_mask]
+            rsp_data['longitude'] = rsp_data_full['longitude'].flatten()[rsp_cost_mask]
+            rsp_data[selected_property] = rsp_data_full[selected_property].flatten()[rsp_cost_mask]
+            rsp_data['cost_function'] = rsp_data_full['cost_function'].flatten()[rsp_cost_mask]
+            rsp_data['original_shape'] = rsp_shape
+            rsp_data['wavelengths'] = rsp_data_full['wavelengths']
+
+            # Apply cost filtering to PACE (2D) - set filtered pixels to NaN (preserve 2D shape)
+            pace_data = {}
+            pace_data['latitude'] = pace_data_full['latitude'].copy()
+            pace_data['longitude'] = pace_data_full['longitude'].copy()
+            pace_data['cost_function'] = pace_data_full['cost_function'].copy()
+            pace_data['original_shape'] = pace_shape
+            pace_data['wavelengths'] = pace_data_full['wavelengths']
+
+            # Set filtered-out pixels to NaN for lat/lon
+            pace_data['latitude'][~pace_cost_mask_2d] = np.nan
+            pace_data['longitude'][~pace_cost_mask_2d] = np.nan
+
+            # Handle property filtering - check for _2d version
+            prop_key_2d = f"{selected_property}_2d"
+            if prop_key_2d in pace_data_full:
+                # Use 2D version
+                pace_data[prop_key_2d] = pace_data_full[prop_key_2d].copy()
+                pace_data[prop_key_2d][~pace_cost_mask_2d] = np.nan
+                # Also include flattened version for consistency
+                pace_data[selected_property] = pace_data[prop_key_2d].flatten()
+            else:
+                # Use flattened version, reshape to 2D, then filter
+                prop_flat = pace_data_full[selected_property].flatten().copy()
+                prop_flat[~pace_cost_mask] = np.nan
+                pace_data[selected_property] = prop_flat
+
+            # Perform matching
+            matching_results = match_rsp_to_pace(rsp_data, pace_data)
+
+            # Check spatial overlap
+            min_distance = np.nanmin(matching_results['distances_km'])
+            mean_distance = np.nanmean(matching_results['distances_km'])
+
+            # Generate scatter plot
+            scatter_fig = create_image_swath_scatter(pace_data, rsp_data, matching_results, selected_property)
+
+            # Generate Property vs Index plots
+            rsp_index_fig = create_property_vs_index_plot(rsp_data, matching_results, selected_property, 'RSP', is_rsp=True)
+            pace_index_fig = create_property_vs_index_plot(pace_data, matching_results, selected_property, 'PACE', is_rsp=False)
+
+            # Update headers
+            rsp_header = f"RSP - {selected_property.replace('_', ' ').title()} vs Point Index"
+            pace_header = f"PACE - {selected_property.replace('_', ' ').title()} vs Point Index (Matched)"
+
+            # Add spatial overlap info to file labels
+            if min_distance > 50:
+                overlap_warning = html.P(
+                    f"⚠️ Warning: Minimum distance = {min_distance:.1f} km. Files may not have spatial overlap.",
+                    style={'color': '#e67e22', 'fontSize': '12px', 'marginTop': '5px', 'marginBottom': '0'}
+                )
+                file_labels = html.Div([file_labels, overlap_warning])
+            else:
+                overlap_info = html.P(
+                    f"✓ Spatial match: min distance = {min_distance:.1f} km, mean distance = {mean_distance:.1f} km",
+                    style={'color': '#27ae60', 'fontSize': '12px', 'marginTop': '5px', 'marginBottom': '0'}
+                )
+                file_labels = html.Div([file_labels, overlap_info])
+
+            # Handle click on RSP Property vs Index plot
+            if clickData is not None and 'points' in clickData and len(clickData['points']) > 0:
+                clicked_point = clickData['points'][0]
+                clicked_index = int(clicked_point['x'])  # Point index from x-axis
+
+                # Get RSP and matched PACE indices
+                rsp_row = matching_results['rsp_indices'][clicked_index]
+                rsp_col = 0  # RSP is 1D
+                pace_row = matching_results['pace_rows'][clicked_index]
+                pace_col = matching_results['pace_cols'][clicked_index]
+                distance_km = matching_results['distances_km'][clicked_index]
+
+                # Add red highlight markers to all plots
+                # 1. Highlight clicked point on RSP Property vs Index plot
+                rsp_prop_value = rsp_data[selected_property].flatten()[clicked_index]
+                rsp_index_fig.add_trace(go.Scatter(
+                    x=[clicked_index],
+                    y=[rsp_prop_value],
+                    mode='markers',
+                    marker=dict(size=15, color='red', symbol='circle', line=dict(width=2, color='white')),
+                    name='Selected Point',
+                    showlegend=False,
+                    hoverinfo='skip'
+                ))
+
+                # 2. Highlight matched point on PACE Property vs Index plot
+                prop_key_2d = f"{selected_property}_2d"
+                if prop_key_2d in pace_data:
+                    pace_prop_value = pace_data[prop_key_2d][pace_row, pace_col]
+                else:
+                    pace_prop_value = pace_data[selected_property].flatten()[pace_row * pace_shape[1] + pace_col]
+
+                pace_index_fig.add_trace(go.Scatter(
+                    x=[clicked_index],
+                    y=[pace_prop_value],
+                    mode='markers',
+                    marker=dict(size=15, color='red', symbol='circle', line=dict(width=2, color='white')),
+                    name='Matched Point',
+                    showlegend=False,
+                    hoverinfo='skip'
+                ))
+
+                # 3. Highlight both points on scatter plot
+                # RSP point (from matching_results)
+                scatter_fig.add_trace(go.Scattermap(
+                    lat=[matching_results['rsp_lats'][clicked_index]],
+                    lon=[matching_results['rsp_lons'][clicked_index]],
+                    mode='markers',
+                    marker=dict(size=20, color='red', symbol='circle'),
+                    name='Selected RSP Point',
+                    showlegend=False,
+                    hovertemplate='Selected RSP Point<br>Lat: %{lat:.4f}<br>Lon: %{lon:.4f}<extra></extra>'
+                ))
+
+                # PACE matched point
+                scatter_fig.add_trace(go.Scattermap(
+                    lat=[matching_results['pace_lats'][clicked_index]],
+                    lon=[matching_results['pace_lons'][clicked_index]],
+                    mode='markers',
+                    marker=dict(size=20, color='red', symbol='circle'),
+                    name='Matched PACE Point',
+                    showlegend=False,
+                    hovertemplate='Matched PACE Point<br>Lat: %{lat:.4f}<br>Lon: %{lon:.4f}<extra></extra>'
+                ))
+
+                # Get Intensity/DoLP data for both points
+                rsp_intensity_data, rsp_dolp_data, rsp_wavelengths = get_channel_intensity_dolp_vza(
+                    rsp_data_full, rsp_row, rsp_col
+                )
+                pace_intensity_data, pace_dolp_data, pace_wavelengths = get_channel_intensity_dolp_vza(
+                    pace_data_full, pace_row, pace_col
+                )
+
+                # Generate wavelength colors
+                rsp_wl_colors = generate_wavelength_colors(rsp_wavelengths)
+                pace_wl_colors = generate_wavelength_colors(pace_wavelengths)
+
+                # Generate Intensity/DoLP plots using existing functions
+                rsp_intensity_fig = create_intensity_plot_only(
+                    rsp_intensity_data, rsp_wavelengths, rsp_wl_colors, "RSP Intensity"
+                )
+                pace_intensity_fig = create_intensity_plot_only(
+                    pace_intensity_data, pace_wavelengths, pace_wl_colors, "PACE Intensity"
+                )
+                rsp_dolp_fig = create_dolp_plot_only(
+                    rsp_dolp_data, rsp_wavelengths, rsp_wl_colors, "RSP DoLP"
+                )
+                pace_dolp_fig = create_dolp_plot_only(
+                    pace_dolp_data, pace_wavelengths, pace_wl_colors, "PACE DoLP"
+                )
+
+                # Generate comparison info table
+                # Get distance warning
+                if distance_km < 5:
+                    distance_color = '#27ae60'
+                    distance_icon = '✓'
+                    distance_text = 'Good spatial match'
+                elif distance_km < 20:
+                    distance_color = '#f39c12'
+                    distance_icon = '⚠'
+                    distance_text = 'Moderate spatial separation'
+                else:
+                    distance_color = '#e74c3c'
+                    distance_icon = '✗'
+                    distance_text = 'Large spatial separation'
+
+                # Create properties tables for both points
+                rsp_props_table = create_properties_table_compact(
+                    rsp_data_full, rsp_row, rsp_col, selected_property
+                )
+                pace_props_table = create_properties_table_compact(
+                    pace_data_full, pace_row, pace_col, selected_property
+                )
+
+                # Build comparison info panel
+                comparison_info = html.Div([
+                    html.Div([
+                        # LEFT: RSP properties
+                        html.Div([
+                            html.H6("RSP Point Properties", style={'textAlign': 'center', 'marginBottom': '10px'}),
+                            html.P(f"Index: {clicked_index}", style={'textAlign': 'center', 'fontSize': '12px'}),
+                            html.P(
+                                f"Location: {matching_results['rsp_lats'][clicked_index]:.4f}°N, " +
+                                f"{matching_results['rsp_lons'][clicked_index]:.4f}°E",
+                                style={'fontSize': '11px', 'textAlign': 'center', 'marginBottom': '10px'}
+                            ),
+                            rsp_props_table
+                        ], style={'flex': '1', 'padding': '10px'}),
+
+                        # CENTER: Distance info
+                        html.Div([
+                            html.H6("Spatial Separation", style={'textAlign': 'center', 'marginBottom': '10px'}),
+                            html.Div(f"{distance_km:.1f} km",
+                                     style={'fontSize': '24px', 'fontWeight': 'bold', 'textAlign': 'center'}),
+                            html.Div([
+                                html.Span(f"{distance_icon} {distance_text}",
+                                          style={'color': distance_color, 'fontWeight': 'bold', 'fontSize': '12px'})
+                            ], style={'textAlign': 'center', 'marginTop': '10px'})
+                        ], style={'flex': '1', 'padding': '10px', 'borderLeft': '2px solid #ddd',
+                                  'borderRight': '2px solid #ddd'}),
+
+                        # RIGHT: PACE properties
+                        html.Div([
+                            html.H6("PACE Point Properties", style={'textAlign': 'center', 'marginBottom': '10px'}),
+                            html.P(f"Grid: [{pace_row}, {pace_col}]",
+                                   style={'textAlign': 'center', 'fontSize': '12px'}),
+                            html.P(
+                                f"Location: {matching_results['pace_lats'][clicked_index]:.4f}°N, " +
+                                f"{matching_results['pace_lons'][clicked_index]:.4f}°E",
+                                style={'fontSize': '11px', 'textAlign': 'center', 'marginBottom': '10px'}
+                            ),
+                            pace_props_table
+                        ], style={'flex': '1', 'padding': '10px'}),
+                    ], style={'display': 'flex', 'flexDirection': 'row'})
+                ])
+
+                comparison_style = {'display': 'block', 'border': '2px solid #bdc3c7',
+                                    'padding': '15px', 'marginTop': '20px', 'borderRadius': '5px'}
+                intensity_style = {'display': 'block', 'marginTop': '30px'}
+                dolp_style = {'display': 'block', 'marginTop': '30px'}
+
+                return (
+                    file_labels,
+                    scatter_fig,
+                    rsp_index_fig, pace_index_fig,
+                    rsp_header, pace_header,
+                    comparison_info, comparison_style,
+                    rsp_intensity_fig, pace_intensity_fig,
+                    rsp_dolp_fig, pace_dolp_fig,
+                    intensity_style, dolp_style,
+                    f"Intensity - RSP (Index {clicked_index})",
+                    f"Intensity - PACE (Index {clicked_index})",
+                    f"DoLP - RSP (Index {clicked_index})",
+                    f"DoLP - PACE (Index {clicked_index})"
+                )
+
+            # If no click yet, return plots with instructions
+            comparison_info = html.P(
+                "Click a point on the RSP Property vs Index plot (left) to see detailed comparison",
+                style={'textAlign': 'center', 'color': '#7f8c8d', 'fontSize': '14px', 'padding': '20px'}
+            )
+            comparison_style = {'display': 'block', 'border': '1px solid #ddd',
+                                'padding': '15px', 'marginTop': '20px', 'borderRadius': '5px'}
+
+            return (
+                file_labels,
+                scatter_fig,
+                rsp_index_fig, pace_index_fig,
+                rsp_header, pace_header,
+                comparison_info, comparison_style,
+                empty_fig, empty_fig, empty_fig, empty_fig,
+                {'display': 'none'}, {'display': 'none'},
+                "", "", "", ""
+            )
+
+        except Exception as e:
+            print(f"Error in update_image_swath_comparison: {e}")
+            import traceback
+            traceback.print_exc()
+            error_msg = html.P(f"Error: {str(e)}",
+                               style={'textAlign': 'center', 'color': '#e74c3c', 'fontSize': '14px'})
+            return (error_msg,) + default_returns[1:]
 
     @app.callback(
         [Output('single-file-plots-container', 'style'),

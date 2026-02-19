@@ -2105,16 +2105,36 @@ def get_channel_intensity_dolp_vza(data_dict, row_idx, col_idx):
         if wl_str not in channel_ranges:
             continue
 
-        # Collevt data for this wavel
+        # Calculate scattering angle for this channel
+        # SZA is stored as cosine values in data_dict
+        sza_cos = sza_channels[wl_str]
+        vza_deg = vza_channels[wl_str]
+        raa_deg = raa_channels[wl_str]
+
+        sza_rad = np.arccos(np.clip(sza_cos, -1, 1))
+        vza_rad = np.radians(np.abs(vza_deg))
+        raa_rad = np.radians(raa_deg)
+        cos_scatter = (-np.cos(sza_rad) * np.cos(vza_rad)
+                       - np.sin(sza_rad) * np.sin(vza_rad) * np.cos(raa_rad))
+        scattering_angle = np.degrees(np.arccos(np.clip(cos_scatter, -1, 1)))
+        sza_deg_vals = np.degrees(sza_rad)
+
+        # Collect data for this wavelength (backward compatible - existing code only uses 'x','y_meas','y_model')
         intensity_data[wl] = {
             'x': vza_channels[wl_str],
             'y_meas': ymvec_intensity_channels[wl_str],
-            'y_model': fvec_intensity_channels[wl_str]
+            'y_model': fvec_intensity_channels[wl_str],
+            'sza': sza_deg_vals,
+            'raa': raa_channels[wl_str],
+            'scattering_angle': scattering_angle
         }
         dolp_data[wl] = {
             'x': vza_channels[wl_str],
             'y_meas': ymvec_dolp_channels[wl_str],
-            'y_model': fvec_dolp_channels[wl_str]
+            'y_model': fvec_dolp_channels[wl_str],
+            'sza': sza_deg_vals,
+            'raa': raa_channels[wl_str],
+            'scattering_angle': scattering_angle
         }
 
     return intensity_data, dolp_data, wavelengths
@@ -2355,6 +2375,202 @@ def create_dolp_plot_only(dolp_data, wavelengths, wl_colors, title):
         autosize=True
     )
 
+    return fig
+
+
+def create_angular_combined_plot(intensity_data, dolp_data, wavelengths, wl_colors, x_axis_type, title=''):
+    """
+    Combined subplot figure: Intensity (top) and DoLP (bottom) vs a selectable
+    angular quantity. Single shared legend; solid lines = measured, dashed = model.
+
+    Args:
+        intensity_data: dict from get_channel_intensity_dolp_vza()
+        dolp_data: dict from get_channel_intensity_dolp_vza()
+        wavelengths: list of wavelength values
+        wl_colors: {wl: color_str} dict
+        x_axis_type: 'vza' | 'sza' | 'raa' | 'scattering_angle'
+        title: figure title prefix
+    """
+    from plotly.subplots import make_subplots
+
+    x_key_map = {
+        'vza': 'x',
+        'scattering_angle': 'scattering_angle',
+        'sza': 'sza',
+        'raa': 'raa'
+    }
+    x_label_map = {
+        'vza': 'Viewing Zenith Angle (degrees)',
+        'scattering_angle': 'Scattering Angle (degrees)',
+        'sza': 'Solar Zenith Angle (degrees)',
+        'raa': 'Relative Azimuth Angle (degrees)'
+    }
+    x_key = x_key_map.get(x_axis_type, 'x')
+    x_label = x_label_map.get(x_axis_type, 'Angle (degrees)')
+
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=False,
+        vertical_spacing=0.18,
+        subplot_titles=['Intensity', 'DoLP']
+    )
+
+    for wl in wavelengths:
+        wl_str = str(int(wl))
+        color = wl_colors.get(wl, 'blue')
+
+        # Intensity subplot (row 1) — wavelength shown once in legend
+        if wl in intensity_data:
+            wl_data = intensity_data[wl]
+            if x_key in wl_data:
+                x_vals = np.array(wl_data[x_key], dtype=float)
+                y_meas = np.array(wl_data['y_meas'], dtype=float)
+                y_model = np.array(wl_data['y_model'], dtype=float)
+                sort_idx = np.argsort(x_vals)
+                fig.add_trace(go.Scatter(
+                    x=x_vals[sort_idx], y=y_meas[sort_idx],
+                    mode='lines+markers',
+                    name=f'{wl_str} nm',
+                    line=dict(color=color, width=2),
+                    marker=dict(color=color, size=6),
+                    legendgroup=wl_str,
+                    showlegend=True
+                ), row=1, col=1)
+                fig.add_trace(go.Scatter(
+                    x=x_vals[sort_idx], y=y_model[sort_idx],
+                    mode='lines+markers',
+                    name=f'{wl_str} nm',
+                    line=dict(color=color, width=2, dash='dashdot'),
+                    marker=dict(color=color, size=6),
+                    legendgroup=wl_str,
+                    showlegend=False
+                ), row=1, col=1)
+
+        # DoLP subplot (row 2) — same legendgroup, hidden from legend
+        if wl in dolp_data:
+            wl_data = dolp_data[wl]
+            if x_key in wl_data:
+                x_vals = np.array(wl_data[x_key], dtype=float)
+                y_meas = np.array(wl_data['y_meas'], dtype=float)
+                y_model = np.array(wl_data['y_model'], dtype=float)
+                sort_idx = np.argsort(x_vals)
+                fig.add_trace(go.Scatter(
+                    x=x_vals[sort_idx], y=y_meas[sort_idx],
+                    mode='lines+markers',
+                    name=f'{wl_str} nm',
+                    line=dict(color=color, width=2),
+                    marker=dict(color=color, size=6),
+                    legendgroup=wl_str,
+                    showlegend=False
+                ), row=2, col=1)
+                fig.add_trace(go.Scatter(
+                    x=x_vals[sort_idx], y=y_model[sort_idx],
+                    mode='lines+markers',
+                    name=f'{wl_str} nm',
+                    line=dict(color=color, width=2, dash='dashdot'),
+                    marker=dict(color=color, size=6),
+                    legendgroup=wl_str,
+                    showlegend=False
+                ), row=2, col=1)
+
+    fig.update_layout(
+        title=f'{title} — Intensity & DoLP vs {x_label_map.get(x_axis_type, "")}',
+        height=1000,
+        hovermode='closest',
+        legend=dict(
+            orientation='h',
+            y=0.5,
+            yanchor='middle',
+            x=0.5,
+            xanchor='center',
+            bgcolor="rgba(255,255,255,0.9)",  # Semi-transparent background
+            bordercolor="rgba(0,0,0,0.3)",
+            borderwidth=1,
+            title=dict(
+                text="<b>Wavelengths </b>" + "(Solid: Measured, - - Dashed: Modeled)</b>",
+                font=dict(size=14, family="Arial", color="black"),
+                side="top"
+            )
+        ),
+        margin=dict(t=80, b=60, l=60, r=40)
+    )
+    fig.update_xaxes(title_text=x_label, row=1, col=1)
+    fig.update_xaxes(title_text=x_label, row=2, col=1)
+    fig.update_yaxes(title_text='Intensity', row=1, col=1)
+    fig.update_yaxes(title_text='DoLP', row=2, col=1)
+    return fig
+
+
+def create_polar_angular_plot(intensity_data, dolp_data, wavelengths, wl_colors,
+                              measurement='intensity', title=''):
+    """
+    Polar plot showing VZA (radial axis) vs RAA (angular axis), colored by
+    intensity or DoLP value.  One trace per wavelength.
+
+    Args:
+        intensity_data / dolp_data: dicts from get_channel_intensity_dolp_vza()
+        wavelengths: list of wavelength values
+        wl_colors: {wl: color_str} dict
+        measurement: 'intensity' or 'dolp'
+        title: figure title prefix
+    """
+    data = intensity_data if measurement == 'intensity' else dolp_data
+    y_label = 'Intensity' if measurement == 'intensity' else 'DoLP'
+
+    fig = go.Figure()
+
+    for wl in wavelengths:
+        if wl not in data:
+            continue
+        wl_data = data[wl]
+        if 'raa' not in wl_data:
+            continue
+
+        color = wl_colors.get(wl, 'blue')
+        vza = np.abs(np.array(wl_data['x'], dtype=float))   # radial = |VZA|
+        raa = np.array(wl_data['raa'], dtype=float)          # angular = RAA
+        y_vals = np.array(wl_data['y_meas'], dtype=float)
+
+        fig.add_trace(go.Scatterpolar(
+            r=vza,
+            theta=raa,
+            mode='markers',
+            name=f'{int(wl)} nm',
+            marker=dict(
+                color=y_vals,
+                colorscale='Viridis',
+                size=10,
+                showscale=bool(wl == wavelengths[0]),
+                colorbar=dict(
+                    title=y_label,
+                    thickness=15,
+                    len=0.7
+                ),
+                line=dict(color=color, width=1)
+            ),
+            hovertemplate=(f'{int(wl)} nm<br>VZA: %{{r:.1f}}°'
+                           f'<br>RAA: %{{theta:.1f}}°'
+                           f'<br>{y_label}: %{{marker.color:.5f}}<extra></extra>')
+        ))
+
+    fig.update_layout(
+        title=f'{title} — Polar ({y_label}: measured)',
+        polar=dict(
+            radialaxis=dict(
+                title='|VZA| (degrees)',
+                angle=90,
+                tickangle=90
+            ),
+            angularaxis=dict(
+                direction='clockwise',
+                tickmode='array',
+                tickvals=[0, 45, 90, 135, 180, 225, 270, 315],
+                ticktext=['0°', '45°', '90°', '135°', '180°', '225°', '270°', '315°']
+            )
+        ),
+        height=550,
+        legend=dict(orientation='h', y=-0.1, x=0.5, xanchor='center')
+    )
     return fig
 
 
@@ -2708,6 +2924,188 @@ def create_image_swath_scatter(pace_data_dict, rsp_data_dict, matching_results, 
         showlegend=True
     )
 
+    return fig
+
+
+def compute_scattering_angle_values(data_dict, x_axis_type):
+    """
+    Compute a single per-pixel value for each spatial point, suitable for
+    coloring the scatter map in Angular Dependence Analysis mode.
+
+    Args:
+        data_dict: data dictionary (filtered)
+        x_axis_type: 'vza' | 'sza' | 'raa' | 'scattering_angle'
+
+    Returns:
+        values: 1D float array, one value per spatial point (NaN-safe)
+        label: human-readable colorbar label string
+    """
+    original_shape = data_dict['original_shape']
+    is_1d = len(original_shape) == 1
+
+    label_map = {
+        'vza': 'Mean |VZA| (deg)',
+        'sza': 'SZA (deg)',
+        'raa': 'Mean RAA (deg)',
+        'scattering_angle': 'Mean Scattering Angle (deg)'
+    }
+    label = label_map.get(x_axis_type, x_axis_type)
+
+    try:
+        if x_axis_type == 'sza':
+            # SZA stored as cosine; take first angle value (SZA is constant across angles)
+            sza_raw = data_dict['sza']
+            if sza_raw.ndim == 3:
+                sza_cos = sza_raw[..., 0]  # shape (rows, cols) or (pts,)
+            elif sza_raw.ndim == 2:
+                sza_cos = sza_raw[:, 0]
+            else:
+                sza_cos = sza_raw
+            values = np.degrees(np.arccos(np.clip(sza_cos.flatten(), -1, 1)))
+
+        elif x_axis_type == 'vza':
+            vza_raw = data_dict['sensor_zenith']
+            if vza_raw.ndim == 3:
+                values = np.nanmean(np.abs(vza_raw), axis=-1).flatten()
+            elif vza_raw.ndim == 2:
+                values = np.nanmean(np.abs(vza_raw), axis=-1).flatten()
+            else:
+                values = np.abs(vza_raw).flatten()
+
+        elif x_axis_type == 'raa':
+            raa_raw = data_dict['raa']
+            if raa_raw.ndim == 3:
+                values = np.nanmean(raa_raw, axis=-1).flatten()
+            elif raa_raw.ndim == 2:
+                values = np.nanmean(raa_raw, axis=-1).flatten()
+            else:
+                values = raa_raw.flatten()
+
+        elif x_axis_type == 'scattering_angle':
+            sza_raw = data_dict['sza']
+            vza_raw = data_dict['sensor_zenith']
+            raa_raw = data_dict['raa']
+
+            # Broadcast to same shape
+            if sza_raw.ndim == 3:
+                sza_cos = sza_raw
+            elif sza_raw.ndim == 2:
+                sza_cos = sza_raw[:, np.newaxis, :] if is_1d else sza_raw[..., np.newaxis]
+            else:
+                sza_cos = sza_raw
+
+            sza_rad = np.arccos(np.clip(sza_cos, -1, 1))
+            vza_rad = np.radians(np.abs(vza_raw))
+            raa_rad = np.radians(raa_raw)
+
+            cos_scatter = (-np.cos(sza_rad) * np.cos(vza_rad)
+                           - np.sin(sza_rad) * np.sin(vza_rad) * np.cos(raa_rad))
+            scatter_angles = np.degrees(np.arccos(np.clip(cos_scatter, -1, 1)))
+            values = np.nanmean(scatter_angles, axis=-1).flatten()
+
+        else:
+            values = np.full(np.prod(original_shape), np.nan)
+
+    except Exception as e:
+        print(f"compute_scattering_angle_values error ({x_axis_type}): {e}")
+        values = np.full(np.prod(original_shape), np.nan)
+
+    return values.astype(float), label
+
+
+def create_angular_scatter_plot(filtered_data, color_values, color_label, clicked_point_data=None):
+    """
+    Scatter map colored by an angular quantity (SZA, VZA, RAA, or scattering angle)
+    instead of a retrieval property. Same Scattermap + OpenStreetMap style as
+    create_scatter_plot_only().
+
+    Args:
+        filtered_data: data dict (must contain 'latitude', 'longitude')
+        color_values: 1D array of per-pixel color values
+        color_label: colorbar title string
+        clicked_point_data: dict with 'row'/'col' for highlighting selected point
+    """
+    fig = go.Figure()
+
+    lats = filtered_data['latitude'].flatten()
+    lons = filtered_data['longitude'].flatten()
+
+    valid = np.isfinite(lats) & np.isfinite(lons) & np.isfinite(color_values)
+    plot_lats = lats[valid]
+    plot_lons = lons[valid]
+    plot_vals = color_values[valid]
+
+    if len(plot_lats) == 0:
+        return create_placeholder_figure("No valid data to display")
+
+    vmin, vmax = np.nanmin(plot_vals), np.nanmax(plot_vals)
+
+    fig.add_trace(go.Scattermap(
+        lat=plot_lats,
+        lon=plot_lons,
+        mode='markers',
+        marker=dict(
+            size=6,
+            color=plot_vals,
+            colorscale='Viridis',
+            cmin=vmin,
+            cmax=vmax,
+            colorbar=dict(
+                title=color_label,
+                x=0.5,
+                y=0.99,
+                lenmode='fraction',
+                len=0.95,
+                orientation='h',
+                yanchor='bottom',
+                title_side='top',
+                thickness=15,
+                outlinewidth=1,
+                outlinecolor='black'
+            ),
+            showscale=True
+        ),
+        hovertemplate=(f'Lat: %{{lat:.4f}}<br>Lon: %{{lon:.4f}}<br>'
+                       f'{color_label}: %{{marker.color:.2f}}<extra></extra>'),
+        customdata=np.arange(len(lats))[valid],
+        showlegend=False
+    ))
+
+    # Highlight clicked point if provided
+    if clicked_point_data is not None and 'row' in clicked_point_data:
+        sel_row = clicked_point_data['row']
+        sel_col = clicked_point_data.get('col', 0)
+        original_shape = filtered_data.get('original_shape', (len(lats),))
+        if len(original_shape) == 1:
+            flat_idx = sel_row
+        else:
+            flat_idx = sel_row * original_shape[1] + sel_col
+        if flat_idx < len(lats) and np.isfinite(lats[flat_idx]):
+            fig.add_trace(go.Scattermap(
+                lat=[lats[flat_idx]],
+                lon=[lons[flat_idx]],
+                mode='markers',
+                marker=dict(size=16, color='red', symbol='circle'),
+                name='Selected',
+                showlegend=False,
+                hoverinfo='skip'
+            ))
+
+    # Map center
+    center_lat = float(np.nanmean(plot_lats))
+    center_lon = float(np.nanmean(plot_lons))
+
+    fig.update_layout(
+        uirevision='angular-scatter',
+        map=dict(
+            style='open-street-map',
+            center=dict(lat=center_lat, lon=center_lon),
+            zoom=4.0
+        ),
+        margin=dict(l=0, r=0, t=30, b=0),
+        autosize=True,
+        height=600
+    )
     return fig
 
 
@@ -5488,6 +5886,90 @@ def run_app(initial_file_path, directory_path):
 
                 ], id='plot-image-swath', style={'display': 'none'}),
 
+                # -------------------------------------------------------
+                # ANGULAR DEPENDENCE ANALYSIS CONTAINER
+                # -------------------------------------------------------
+                html.Div([
+
+                    # ---- SCATTER MAPS (multi-file mode) ----
+                    html.Div([
+                        html.Div([
+                            html.H4("", id='angular-file-1-scatter-header', style={'textAlign': 'center'}),
+                            dcc.Graph(id='angular-scatter-plot-1', style={'height': '600px'})
+                        ], style={'width': '49%', 'display': 'inline-block', 'verticalAlign': 'top'}),
+                        html.Div([
+                            html.H4("", id='angular-file-2-scatter-header', style={'textAlign': 'center'}),
+                            dcc.Graph(id='angular-scatter-plot-2', style={'height': '600px'})
+                        ], style={'width': '49%', 'display': 'inline-block', 'verticalAlign': 'top', 'marginLeft': '2%'}),
+                    ], id='angular-scatter-multi', style={'display': 'none', 'marginBottom': '25px'}),
+
+                    # ---- SCATTER MAP (single-file mode) ----
+                    html.Div([
+                        html.H4("", id='angular-file-1-header-single', style={'textAlign': 'center'}),
+                        dcc.Graph(id='angular-scatter-plot-single', style={'height': '600px'})
+                    ], id='angular-scatter-single', style={'display': 'block', 'marginBottom': '25px'}),
+
+                    # ---- ANGULAR QUANTITY DROPDOWN (between scatter and line plots) ----
+                    html.Div([
+                        html.Div([
+                            html.Label("Angular Quantity:", style={'fontWeight': 'bold', 'marginRight': '10px'}),
+                            dcc.Dropdown(
+                                id='angular-x-axis-selector',
+                                options=[
+                                    {'label': 'Viewing Zenith Angle (VZA)', 'value': 'vza'},
+                                    {'label': 'Scattering Angle', 'value': 'scattering_angle'},
+                                    {'label': 'Solar Zenith Angle (SZA)', 'value': 'sza'},
+                                    {'label': 'Relative Azimuth Angle (RAA)', 'value': 'raa'},
+                                ],
+                                value='scattering_angle',
+                                clearable=False,
+                                style={'width': '350px', 'display': 'inline-block', 'verticalAlign': 'middle'}
+                            ),
+                        ], style={'display': 'flex', 'alignItems': 'center'}),
+                        html.P(
+                            "Scatter map colored by selected quantity; click a point to view angular plots below.",
+                            style={'fontSize': '14px', 'fontWeight': 'bold', 'color': '#666', 'margin': '0 0 8px 0'}
+                        ),
+                    ], style={'paddingTop': '25px', 'paddingBottom': '15px', 'marginBottom': '15px'}),
+
+                    # ---- LINE + POLAR PLOTS (multi-file mode) ----
+                    html.Div([
+                        # Combined Intensity+DoLP subplot plots side-by-side
+                        html.Div([
+                            html.Div([
+                                dcc.Graph(id='angular-combined-plot-1', style={'height': '1000px'})
+                            ], style={'width': '49%', 'display': 'inline-block', 'verticalAlign': 'top'}),
+                            html.Div([
+                                dcc.Graph(id='angular-combined-plot-2', style={'height': '1000px'})
+                            ], style={'width': '49%', 'display': 'inline-block', 'verticalAlign': 'top', 'marginLeft': '2%'}),
+                        ], style={'marginBottom': '25px'}),
+
+                        # Polar plots side-by-side (intensity only)
+                        html.Div([
+                            html.Div([
+                                dcc.Graph(id='angular-polar-intensity-plot-1', style={'height': '550px'})
+                            ], style={'width': '49%', 'display': 'inline-block', 'verticalAlign': 'top'}),
+                            html.Div([
+                                dcc.Graph(id='angular-polar-intensity-plot-2', style={'height': '550px'})
+                            ], style={'width': '49%', 'display': 'inline-block', 'verticalAlign': 'top', 'marginLeft': '2%'}),
+                        ]),
+                    ], id='angular-multi-bottom', style={'display': 'none'}),
+
+                    # ---- LINE + POLAR PLOTS (single-file mode) ----
+                    html.Div([
+                        # Combined Intensity+DoLP subplot plot
+                        html.Div([
+                            dcc.Graph(id='angular-combined-plot-single', style={'height': '1000px'})
+                        ], style={'marginBottom': '25px'}),
+
+                        # Polar plot (intensity only)
+                        html.Div([
+                            dcc.Graph(id='angular-polar-intensity-plot-single', style={'height': '550px'})
+                        ]),
+                    ], id='angular-single-bottom', style={'display': 'block'}),
+
+                ], id='plot-angular-dependence', style={'display': 'none'}),
+
             ], style={
                 'flex': '0 0 74%'
             }),
@@ -5551,6 +6033,9 @@ def run_app(initial_file_path, directory_path):
         # Add Image/Swath Comparison option only in multi-file mode
         if analysis_mode == 'multiple':
             base_options.append({'label': 'Image/Swath Comparison', 'value': 'image_swath'})
+
+        # Angular Dependence Analysis available in all modes
+        base_options.append({'label': 'Angular Dependence Analysis', 'value': 'angular_dependence'})
 
         return base_options
 
@@ -5689,7 +6174,8 @@ def run_app(initial_file_path, directory_path):
          Output('plot-histogram', 'style'),
          Output('plot-aod-total', 'style'),
          Output('plot-aod-time', 'style'),
-         Output('plot-image-swath', 'style')],
+         Output('plot-image-swath', 'style'),
+         Output('plot-angular-dependence', 'style')],
         Input('plot-type-selector', 'value')
     )
     def update_plot_visibility(plot_type):
@@ -5703,7 +6189,8 @@ def run_app(initial_file_path, directory_path):
             {'display': 'none'},  # histogram
             {'display': 'none'},  # aod_total
             {'display': 'none'},  # aod_time
-            {'display': 'none'}   # image_swath
+            {'display': 'none'},  # image_swath
+            {'display': 'none'}   # angular_dependence
         ]
 
         # Show the selected plot
@@ -5715,7 +6202,8 @@ def run_app(initial_file_path, directory_path):
             'histogram': 4,
             'aod_total': 5,
             'aod_time': 6,
-            'image_swath': 7
+            'image_swath': 7,
+            'angular_dependence': 8
         }
 
         if plot_type in plot_map:
@@ -6526,6 +7014,281 @@ def run_app(initial_file_path, directory_path):
             error_msg = html.P(f"Error: {str(e)}",
                                style={'textAlign': 'center', 'color': '#e74c3c', 'fontSize': '14px'})
             return (error_msg,) + default_returns[1:]
+
+    # ---------------------------------------------------
+    # ANGULAR DEPENDENCE ANALYSIS CALLBACK
+    # ---------------------------------------------------
+    @app.callback(
+        [Output('angular-scatter-multi', 'style'),
+         Output('angular-scatter-single', 'style'),
+         Output('angular-multi-bottom', 'style'),
+         Output('angular-single-bottom', 'style'),
+         Output('angular-scatter-plot-1', 'figure'),
+         Output('angular-scatter-plot-2', 'figure'),
+         Output('angular-scatter-plot-single', 'figure'),
+         Output('angular-combined-plot-1', 'figure'),
+         Output('angular-combined-plot-2', 'figure'),
+         Output('angular-combined-plot-single', 'figure'),
+         Output('angular-polar-intensity-plot-1', 'figure'),
+         Output('angular-polar-intensity-plot-2', 'figure'),
+         Output('angular-polar-intensity-plot-single', 'figure'),
+         Output('angular-file-1-scatter-header', 'children'),
+         Output('angular-file-2-scatter-header', 'children'),
+         Output('angular-file-1-header-single', 'children')],
+        [Input('individual-analysis-mode', 'value'),
+         Input('file-selector', 'value'),
+         Input('individual-file-selector-2', 'value'),
+         Input('applied-cost-value', 'data'),
+         Input('plot-type-selector', 'value'),
+         Input('angular-x-axis-selector', 'value'),
+         Input('angular-scatter-plot-1', 'clickData'),
+         Input('angular-scatter-plot-single', 'clickData')],
+        prevent_initial_call=True
+    )
+    def update_angular_dependence_plots(analysis_mode, file_path_1, file_path_2,
+                                        max_cost, plot_type, x_axis_type,
+                                        click_multi, click_single):
+        """
+        Angular Dependence Analysis: scatter maps colored by selected angular
+        quantity; Intensity, DoLP, and polar plots for the clicked point.
+        Works in both single-file and multi-file modes.
+        """
+        print("Doing callback: update_angular_dependence_plots")
+
+        empty_fig = create_placeholder_figure("No data")
+        click_msg = create_placeholder_figure("Click a point on the map to view angular plots")
+
+        n_empty = 9  # total figure outputs (3 each: scatter, combined, polar-intensity)
+        default_returns = (
+            {'display': 'none'}, {'display': 'block'},   # scatter-multi, scatter-single
+            {'display': 'none'}, {'display': 'block'},   # bottom-multi, bottom-single
+            *([empty_fig] * n_empty),                    # all figures
+            "", "", ""                                    # headers
+        )
+
+        # Early return if not this plot type
+        if plot_type != 'angular_dependence':
+            return default_returns
+
+        # Reset click on file / mode change
+        ctx = callback_context
+        files_changed = any(
+            'file-selector' in t['prop_id'] or
+            'individual-file-selector-2' in t['prop_id'] or
+            'individual-analysis-mode' in t['prop_id']
+            for t in ctx.triggered
+        )
+        if files_changed:
+            click_multi = None
+            click_single = None
+
+        is_multi = (analysis_mode == 'multiple')
+        scatter_multi_style = {'display': 'block'} if is_multi else {'display': 'none'}
+        scatter_single_style = {'display': 'none'} if is_multi else {'display': 'block'}
+        bottom_multi_style = {'display': 'block'} if is_multi else {'display': 'none'}
+        bottom_single_style = {'display': 'none'} if is_multi else {'display': 'block'}
+
+        x_axis_type = x_axis_type or 'scattering_angle'
+
+        try:
+            # ---- SINGLE-FILE MODE ----
+            if not is_multi:
+                if file_path_1 is None:
+                    return (scatter_multi_style, scatter_single_style,
+                            bottom_multi_style, bottom_single_style,
+                            *([click_msg] * n_empty), "", "", "")
+
+                cached = get_cached_data(file_path_1)
+                data_dict = cached['data_dict']
+                filtered_data, original_indices = filter_by_cost(data_dict, max_cost)
+
+                # Compute angular color values for scatter map
+                color_values, color_label = compute_scattering_angle_values(filtered_data, x_axis_type)
+                fname = os.path.basename(file_path_1)
+
+                # Determine clicked point using pointNumber (same approach as main scatter callback)
+                clicked_point_data = None
+                if click_single is not None and 'points' in click_single and click_single['points']:
+                    pt = click_single['points'][0]
+                    point_number = pt.get('pointNumber', None)
+                    curve_number = pt.get('curveNumber', 0)
+                    # Only process clicks on the main data trace (curveNumber 0), not the red highlight
+                    if point_number is not None and curve_number == 0:
+                        lats_flat = filtered_data['latitude'].flatten()
+                        lons_flat = filtered_data['longitude'].flatten()
+                        valid_mask = np.isfinite(lats_flat) & np.isfinite(lons_flat) & np.isfinite(color_values)
+                        valid_flat_indices = np.arange(len(lats_flat))[valid_mask]
+                        if point_number < len(valid_flat_indices):
+                            original_idx = int(valid_flat_indices[point_number])
+                            original_shape = data_dict['original_shape']
+                            if len(original_shape) == 1:
+                                sel_row, sel_col = original_idx, 0
+                            else:
+                                sel_row = original_idx // original_shape[1]
+                                sel_col = original_idx % original_shape[1]
+                            clicked_point_data = {'row': sel_row, 'col': sel_col}
+
+                scatter_fig = create_angular_scatter_plot(
+                    filtered_data, color_values, color_label, clicked_point_data
+                )
+
+                if clicked_point_data is None:
+                    return (scatter_multi_style, scatter_single_style,
+                            bottom_multi_style, bottom_single_style,
+                            empty_fig, empty_fig, scatter_fig,
+                            click_msg, click_msg, click_msg,
+                            click_msg, click_msg, click_msg,
+                            "", "", fname)
+
+                sel_row = clicked_point_data['row']
+                sel_col = clicked_point_data['col']
+
+                intensity_data, dolp_data, wavelengths = get_channel_intensity_dolp_vza(
+                    data_dict, sel_row, sel_col
+                )
+                wl_colors = generate_wavelength_colors(wavelengths)
+
+                combined_fig = create_angular_combined_plot(
+                    intensity_data, dolp_data, wavelengths, wl_colors, x_axis_type, fname
+                )
+                polar_int_fig = create_polar_angular_plot(
+                    intensity_data, dolp_data, wavelengths, wl_colors, 'intensity', fname
+                )
+
+                return (scatter_multi_style, scatter_single_style,
+                        bottom_multi_style, bottom_single_style,
+                        empty_fig, empty_fig, scatter_fig,
+                        empty_fig, empty_fig, combined_fig,
+                        empty_fig, empty_fig, polar_int_fig,
+                        "", "", fname)
+
+            # ---- MULTI-FILE MODE ----
+            if file_path_1 is None and file_path_2 is None:
+                return (scatter_multi_style, scatter_single_style,
+                        bottom_multi_style, bottom_single_style,
+                        *([click_msg] * n_empty), "", "", "")
+
+            fname1 = os.path.basename(file_path_1) if file_path_1 else ""
+            fname2 = os.path.basename(file_path_2) if file_path_2 else ""
+
+            # Load and filter both files; each file tracks its own clicked point
+            scatter_fig_1 = empty_fig
+            scatter_fig_2 = empty_fig
+            clicked_point_data_1 = None
+            clicked_point_data_2 = None
+            clicked_lat = None
+            clicked_lon = None
+
+            if file_path_1:
+                cached_1 = get_cached_data(file_path_1)
+                data_dict_1 = cached_1['data_dict']
+                filtered_1, _ = filter_by_cost(data_dict_1, max_cost)
+                color_values_1, color_label_1 = compute_scattering_angle_values(filtered_1, x_axis_type)
+
+                # Determine clicked point from File 1 using pointNumber
+                if click_multi is not None and 'points' in click_multi and click_multi['points']:
+                    pt = click_multi['points'][0]
+                    point_number = pt.get('pointNumber', None)
+                    curve_number = pt.get('curveNumber', 0)
+                    if point_number is not None and curve_number == 0:
+                        lats_flat_1 = filtered_1['latitude'].flatten()
+                        lons_flat_1 = filtered_1['longitude'].flatten()
+                        valid_mask_1 = np.isfinite(lats_flat_1) & np.isfinite(lons_flat_1) & np.isfinite(color_values_1)
+                        valid_flat_indices_1 = np.arange(len(lats_flat_1))[valid_mask_1]
+                        if point_number < len(valid_flat_indices_1):
+                            original_idx_1 = int(valid_flat_indices_1[point_number])
+                            original_shape_1 = data_dict_1['original_shape']
+                            if len(original_shape_1) == 1:
+                                sel_row_1, sel_col_1 = original_idx_1, 0
+                            else:
+                                sel_row_1 = original_idx_1 // original_shape_1[1]
+                                sel_col_1 = original_idx_1 % original_shape_1[1]
+                            clicked_point_data_1 = {'row': sel_row_1, 'col': sel_col_1}
+                            clicked_lat = float(lats_flat_1[original_idx_1])
+                            clicked_lon = float(lons_flat_1[original_idx_1])
+
+                scatter_fig_1 = create_angular_scatter_plot(
+                    filtered_1, color_values_1, color_label_1, clicked_point_data_1
+                )
+
+            if file_path_2:
+                cached_2 = get_cached_data(file_path_2)
+                data_dict_2 = cached_2['data_dict']
+                filtered_2, _ = filter_by_cost(data_dict_2, max_cost)
+                color_values_2, color_label_2 = compute_scattering_angle_values(filtered_2, x_axis_type)
+
+                # Find nearest point in File 2 to the clicked File 1 point
+                if clicked_lat is not None and clicked_lon is not None:
+                    lats_flat_2 = filtered_2['latitude'].flatten()
+                    lons_flat_2 = filtered_2['longitude'].flatten()
+                    valid_mask_2 = np.isfinite(lats_flat_2) & np.isfinite(lons_flat_2)
+                    if valid_mask_2.any():
+                        valid_lats_2 = lats_flat_2[valid_mask_2]
+                        valid_lons_2 = lons_flat_2[valid_mask_2]
+                        valid_indices_2 = np.arange(len(lats_flat_2))[valid_mask_2]
+                        distances = np.sqrt((valid_lats_2 - clicked_lat)**2 + (valid_lons_2 - clicked_lon)**2)
+                        nearest_flat_idx_2 = int(valid_indices_2[int(np.argmin(distances))])
+                        original_shape_2 = data_dict_2['original_shape']
+                        if len(original_shape_2) == 1:
+                            nearest_row_2, nearest_col_2 = nearest_flat_idx_2, 0
+                        else:
+                            nearest_row_2 = nearest_flat_idx_2 // original_shape_2[1]
+                            nearest_col_2 = nearest_flat_idx_2 % original_shape_2[1]
+                        clicked_point_data_2 = {'row': nearest_row_2, 'col': nearest_col_2}
+
+                scatter_fig_2 = create_angular_scatter_plot(
+                    filtered_2, color_values_2, color_label_2, clicked_point_data_2
+                )
+
+            if clicked_point_data_1 is None:
+                return (scatter_multi_style, scatter_single_style,
+                        bottom_multi_style, bottom_single_style,
+                        scatter_fig_1, scatter_fig_2, empty_fig,
+                        click_msg, click_msg, click_msg,
+                        click_msg, click_msg, click_msg,
+                        fname1, fname2, "")
+
+            # Generate angular plots for File 1
+            combined_fig_1 = polar_int_1 = click_msg
+            if file_path_1:
+                try:
+                    int_data_1, dolp_data_1, wl_1 = get_channel_intensity_dolp_vza(
+                        data_dict_1, clicked_point_data_1['row'], clicked_point_data_1['col']
+                    )
+                    wl_colors_1 = generate_wavelength_colors(wl_1)
+                    combined_fig_1 = create_angular_combined_plot(int_data_1, dolp_data_1, wl_1, wl_colors_1, x_axis_type, fname1)
+                    polar_int_1 = create_polar_angular_plot(int_data_1, dolp_data_1, wl_1, wl_colors_1, 'intensity', fname1)
+                except Exception as e:
+                    print(f"Error generating File 1 angular plots: {e}")
+
+            # Generate angular plots for File 2 (nearest-neighbor matched point)
+            combined_fig_2 = polar_int_2 = click_msg
+            if file_path_2 and clicked_point_data_2 is not None:
+                try:
+                    int_data_2, dolp_data_2, wl_2 = get_channel_intensity_dolp_vza(
+                        data_dict_2, clicked_point_data_2['row'], clicked_point_data_2['col']
+                    )
+                    wl_colors_2 = generate_wavelength_colors(wl_2)
+                    combined_fig_2 = create_angular_combined_plot(int_data_2, dolp_data_2, wl_2, wl_colors_2, x_axis_type, fname2)
+                    polar_int_2 = create_polar_angular_plot(int_data_2, dolp_data_2, wl_2, wl_colors_2, 'intensity', fname2)
+                except Exception as e:
+                    print(f"Error generating File 2 angular plots: {e}")
+
+            return (scatter_multi_style, scatter_single_style,
+                    bottom_multi_style, bottom_single_style,
+                    scatter_fig_1, scatter_fig_2, empty_fig,
+                    combined_fig_1, combined_fig_2, empty_fig,
+                    polar_int_1, polar_int_2, empty_fig,
+                    fname1, fname2, "")
+
+        except Exception as e:
+            print(f"Error in update_angular_dependence_plots: {e}")
+            import traceback
+            traceback.print_exc()
+            return (scatter_multi_style, scatter_single_style,
+                    bottom_multi_style, bottom_single_style,
+                    *([create_placeholder_figure(f"Error: {str(e)}")] * n_empty),
+                    "", "", "")
 
     @app.callback(
         [Output('single-file-plots-container', 'style'),

@@ -861,52 +861,54 @@ def get_wavelength_mapping_pace():
     return wavelength_mapping
 
 
-def get_wavelength_mapping_rsp():
+def get_wavelength_mapping_rsp(data_dict):
     """
-    Returns wavelength-instrument mapping for RSP files.
-    Modify this to add new RSP wavelengths.
+    Build wavelength mapping dynamically from RSP file data.
+    No hard-coded wavelengths or viewing angle counts.
 
-    RSP has 504 viewing angles total, shared across all wavelengths.
-    Each wavelength has 126 viewing angles (504 / 4 wavelengths).
+    Args:
+        data_dict: Dictionary containing 'wavelengths' and 'num_angles_per_wavelength'
 
     Returns:
-        wavelength_mapping (list): containing each measurement wavelength,
-            corresponding instrument, and number of views.
+        wavelength_mapping (list): List of (wavelength, instrument, n_angles) tuples
     """
-    num_angles = 126
-    # wavelength_mapping = [
-    #     (555, 'RSP', 126),
-    #     (410, 'RSP', 126),
-    #     (469, 'RSP', 126),
-    #     (670, 'RSP', 126),
-    #     (864, 'RSP', 126)
-    # ]
+    wavelengths = data_dict.get('wavelengths', [])
+    num_angles = data_dict.get('num_angles_per_wavelength', None)
+
+    if len(wavelengths) == 0:
+        raise ValueError("No wavelengths found in data_dict['wavelengths']")
+
+    if num_angles is None:
+        raise ValueError("num_angles_per_wavelength not found in data_dict")
+
+    # Build mapping dynamically from file data
     wavelength_mapping = [
-        (555, 'RSP', num_angles),
-        (410, 'RSP', num_angles),
-        (469, 'RSP', num_angles),
-        (670, 'RSP', num_angles),
-        (864, 'RSP', num_angles),
-        (1594, 'RSP', num_angles),
-        (2264, 'RSP', num_angles)
+        (int(wl), 'RSP', num_angles) for wl in wavelengths
     ]
+
+    if debug > 1:
+        print(f"Built RSP wavelength mapping: {len(wavelengths)} wavelengths × {num_angles} angles each")
+        print(f"  Wavelengths: {[int(wl) for wl in wavelengths]}")
 
     return wavelength_mapping
 
 
-def get_wavelength_instrument_mapping(file_format='HARP2'):
+def get_wavelength_instrument_mapping(file_format='HARP2', data_dict=None):
     """
     Dispatcher function that returns the appropriate wavelength mapping
     based on file format.
 
     Args:
         file_format (str): File format type ('HARP2', 'RSP', etc.)
+        data_dict (dict): Data dictionary (required for RSP to build mapping dynamically)
 
     Returns:
         wavelength_mapping (list): format-specific wavelength mapping
     """
     if file_format == 'RSP':
-        return get_wavelength_mapping_rsp()
+        if data_dict is None:
+            raise ValueError("data_dict is required for RSP file format to build wavelength mapping dynamically")
+        return get_wavelength_mapping_rsp(data_dict)
     else:  # Default to PACE/HARP2
         return get_wavelength_mapping_pace()
 
@@ -1389,25 +1391,75 @@ def read_rsp_hdf5_variables(file_path):
             else:
                 raise ValueError("Latitude/longitude data not found in RSP file")
 
-            # Get viewing zenith angles (sensor_zenith in RSP)
+            # Get angular variables - read untiled versions (standard names)
+            # New format: shape is (pixels, 1, num_angles) - squeeze middle dimension
+            # Old format: shape is (pixels, num_angles) - no squeezing needed
+
+            # Untiled sensor zenith (viewing zenith angles)
             if 'sensor_zenith' in f:
-                sensor_zenith = f['sensor_zenith'][:]
+                sensor_zenith_raw = f['sensor_zenith'][:]
+                # Handle both (pixels, 1, angles) and (pixels, angles) shapes
+                if sensor_zenith_raw.ndim == 3 and sensor_zenith_raw.shape[1] == 1:
+                    sensor_zenith = sensor_zenith_raw[:, 0, :]  # (pixels, angles)
+                else:
+                    sensor_zenith = sensor_zenith_raw
                 data_dict['sensor_zenith'] = sensor_zenith
 
-                # Check for NaN values
+                # Infer number of viewing angles per wavelength from untiled sensor_zenith
+                num_angles_per_wavelength = sensor_zenith.shape[-1]
+                data_dict['num_angles_per_wavelength'] = num_angles_per_wavelength
+                if debug > 1:
+                    print(f"Inferred {num_angles_per_wavelength} viewing angles per wavelength")
+
                 nan_count = np.isnan(sensor_zenith).sum()
                 if nan_count > 0 and debug > 1:
                     print(f"Warning: Found {nan_count} NaN values in sensor_zenith")
 
-            # Get relative azimuth angles
-            if 'raa' in f:
-                raa = f['raa'][:]
+            # Untiled relative azimuth angles
+            if 'relative_azimuth' in f:
+                relative_azimuth_raw = f['relative_azimuth'][:]
+                if relative_azimuth_raw.ndim == 3 and relative_azimuth_raw.shape[1] == 1:
+                    relative_azimuth = relative_azimuth_raw[:, 0, :]
+                else:
+                    relative_azimuth = relative_azimuth_raw
+                data_dict['relative_azimuth'] = relative_azimuth
+                data_dict['raa'] = relative_azimuth  # Backward compatibility alias
+                if debug > 1:
+                    print(f"Read relative_azimuth with shape {relative_azimuth.shape}")
+            elif 'raa' in f:
+                # Fallback to old tiled variable name for backward compatibility
+                raa_raw = f['raa'][:]
+                if raa_raw.ndim == 3 and raa_raw.shape[1] == 1:
+                    raa = raa_raw[:, 0, :]
+                else:
+                    raa = raa_raw
                 data_dict['raa'] = raa
+                data_dict['relative_azimuth'] = raa  # Forward compatibility
+                if debug > 1:
+                    print(f"Read raa (tiled) with shape {raa.shape}")
 
-            # Get solar zenith angles
-            if 'sza' in f:
-                sza = f['sza'][:]
+            # Untiled solar zenith angles
+            if 'solar_zenith' in f:
+                solar_zenith_raw = f['solar_zenith'][:]
+                if solar_zenith_raw.ndim == 3 and solar_zenith_raw.shape[1] == 1:
+                    solar_zenith = solar_zenith_raw[:, 0, :]
+                else:
+                    solar_zenith = solar_zenith_raw
+                data_dict['solar_zenith'] = solar_zenith
+                data_dict['sza'] = solar_zenith  # Backward compatibility alias
+                if debug > 1:
+                    print(f"Read solar_zenith with shape {solar_zenith.shape}")
+            elif 'sza' in f:
+                # Fallback to old tiled variable name for backward compatibility
+                sza_raw = f['sza'][:]
+                if sza_raw.ndim == 3 and sza_raw.shape[1] == 1:
+                    sza = sza_raw[:, 0, :]
+                else:
+                    sza = sza_raw
                 data_dict['sza'] = sza
+                data_dict['solar_zenith'] = sza  # Forward compatibility
+                if debug > 1:
+                    print(f"Read sza (tiled) with shape {sza.shape}")
 
             # Get measurement and model vectors for intensity and DoLP
             if 'ymvec' in f:
@@ -1904,7 +1956,7 @@ def get_channel_intensity_dolp_vza(data_dict, row_idx, col_idx):
 
     # Get wavel-instrument mapping and build channel ranges dynamically
     file_format = data_dict.get('file_format', 'HARP2')
-    wavelength_mapping = get_wavelength_instrument_mapping(file_format)
+    wavelength_mapping = get_wavelength_instrument_mapping(file_format, data_dict)
 
     # Use order from output_channels or wavelengths in file
     output_channels = data_dict.get('wavelengths', None)
@@ -1980,7 +2032,7 @@ def get_channel_intensity_dolp_vza(data_dict, row_idx, col_idx):
         if np.any(np.isnan(point_vza)) or np.any(np.isnan(point_sza)) or np.any(np.isnan(point_raa)):
             print("Warning: NaN values found in angular data for point [{}, {}]".format(row_idx, col_idx))
     elif vza.ndim == 3 and len(original_shape) == 1 and vza.shape[0] == original_shape[0]:
-        # 3D case: RSP format (spatial_points, 1, angles)
+        # 3D case: Old RSP format (spatial_points, 1, angles) with tiled angles
         point_vza = vza[row_idx, 0, :]  # squeeze out the middle dimension
         point_sza = sza[row_idx, 0, :]
         point_raa = raa[row_idx, 0, :]
@@ -1989,6 +2041,25 @@ def get_channel_intensity_dolp_vza(data_dict, row_idx, col_idx):
         if len(point_vza) != total_intensity_angles:
             print("Warning: Expected angular data length {}, got {}".format(
                 total_intensity_angles, len(point_vza)))
+
+        # Check for NaN values
+        if np.any(np.isnan(point_vza)) or np.any(np.isnan(point_sza)) or np.any(np.isnan(point_raa)):
+            print("Warning: NaN values found in angular data for point [{}]".format(row_idx))
+    elif vza.ndim == 2 and len(original_shape) == 1 and vza.shape[0] == original_shape[0]:
+        # 2D case: New RSP format (spatial_points, angles) with untiled angles
+        # The same angles apply to all wavelengths - tile them to match expected length
+        point_vza_base = vza[row_idx, :]  # (num_angles,) e.g., (80,)
+        point_sza_base = sza[row_idx, :]
+        point_raa_base = raa[row_idx, :]
+
+        # Tile to match total_intensity_angles (num_wavelengths × num_angles_per_wavelength)
+        num_wavelengths = len([w for w, inst, _ in wavelength_mapping if inst != 'OCI'])
+        point_vza = np.tile(point_vza_base, num_wavelengths)  # Replicate for each wavelength
+        point_sza = np.tile(point_sza_base, num_wavelengths)
+        point_raa = np.tile(point_raa_base, num_wavelengths)
+
+        if debug > 1:
+            print(f"Tiled untiled angular data: {len(point_vza_base)} angles × {num_wavelengths} wavelengths = {len(point_vza)} total")
 
         # Check for NaN values
         if np.any(np.isnan(point_vza)) or np.any(np.isnan(point_sza)) or np.any(np.isnan(point_raa)):
@@ -2044,7 +2115,7 @@ def get_channel_intensity_dolp_vza(data_dict, row_idx, col_idx):
         raa_channels[wl_str] = raas
 
         # Handle vza sign based on instrument (OCI only has 1 vza)
-        if instrument in ['SPEX', 'HARP']:
+        if instrument in ['SPEX', 'HARP', 'RSP']:
             # ADAM: skip sign change if there are NaN values. This may need to
             # be adjusted based on NaN distribution
             if np.any(np.isnan(vzas)):
@@ -2940,8 +3011,8 @@ def compute_scattering_angle_values(data_dict, x_axis_type):
         values: 1D float array, one value per spatial point (NaN-safe)
         label: human-readable colorbar label string
     """
-    original_shape = data_dict['original_shape']
-    is_1d = len(original_shape) == 1
+    # Get actual number of spatial points from latitude (handles filtered data correctly)
+    num_points = len(data_dict['latitude'].flatten())
 
     label_map = {
         'vza': 'Mean |VZA| (deg)',
@@ -2986,17 +3057,28 @@ def compute_scattering_angle_values(data_dict, x_axis_type):
             vza_raw = data_dict['sensor_zenith']
             raa_raw = data_dict['raa']
 
-            # Broadcast to same shape
-            if sza_raw.ndim == 3:
+            # Handle different dimensionalities
+            # New RSP format: (pixels, angles) - no broadcasting needed, already aligned
+            # Old HARP format: (lat, lon, angles)
+            if sza_raw.ndim == 3 and vza_raw.ndim == 3 and raa_raw.ndim == 3:
+                # 3D case - all already same shape
                 sza_cos = sza_raw
-            elif sza_raw.ndim == 2:
-                sza_cos = sza_raw[:, np.newaxis, :] if is_1d else sza_raw[..., np.newaxis]
+                vza_vals = vza_raw
+                raa_vals = raa_raw
+            elif sza_raw.ndim == 2 and vza_raw.ndim == 2 and raa_raw.ndim == 2:
+                # 2D case (new RSP format) - all already same shape (pixels, angles)
+                sza_cos = sza_raw
+                vza_vals = vza_raw
+                raa_vals = raa_raw
             else:
+                # Fallback for mixed dimensions
                 sza_cos = sza_raw
+                vza_vals = vza_raw
+                raa_vals = raa_raw
 
             sza_rad = np.arccos(np.clip(sza_cos, -1, 1))
-            vza_rad = np.radians(np.abs(vza_raw))
-            raa_rad = np.radians(raa_raw)
+            vza_rad = np.radians(np.abs(vza_vals))
+            raa_rad = np.radians(raa_vals)
 
             cos_scatter = (-np.cos(sza_rad) * np.cos(vza_rad)
                            - np.sin(sza_rad) * np.sin(vza_rad) * np.cos(raa_rad))
@@ -3004,11 +3086,13 @@ def compute_scattering_angle_values(data_dict, x_axis_type):
             values = np.nanmean(scatter_angles, axis=-1).flatten()
 
         else:
-            values = np.full(np.prod(original_shape), np.nan)
+            values = np.full(num_points, np.nan)
 
     except Exception as e:
         print(f"compute_scattering_angle_values error ({x_axis_type}): {e}")
-        values = np.full(np.prod(original_shape), np.nan)
+        import traceback
+        traceback.print_exc()
+        values = np.full(num_points, np.nan)
 
     return values.astype(float), label
 
@@ -3109,7 +3193,7 @@ def create_angular_scatter_plot(filtered_data, color_values, color_label, clicke
     return fig
 
 
-def create_combined_intensity_dolp_plot(intensity_data, dolp_data, wavelengths, wl_colors, file_format='HARP2'):
+def create_combined_intensity_dolp_plot(intensity_data, dolp_data, wavelengths, wl_colors, file_format='HARP2', data_dict=None):
     """
     Create a single plot with intensity and DoLP as subplots
     with legend between them
@@ -3249,7 +3333,7 @@ def create_combined_intensity_dolp_plot(intensity_data, dolp_data, wavelengths, 
     for wl in wavelengths:
         name = f'{wl} nm'
         # get instrument type for this wl
-        wl_mapping = get_wavelength_instrument_mapping(file_format)
+        wl_mapping = get_wavelength_instrument_mapping(file_format, data_dict)
         instrument = None
         for w, inst, n_vza in wl_mapping:
             if w == wl:
@@ -8685,7 +8769,7 @@ def run_app(initial_file_path, directory_path):
                 # Create combined plot with subplots
                 file_format = data_dict.get('file_format', 'HARP2')
                 combined_fig = create_combined_intensity_dolp_plot(
-                    intensity_data, dolp_data, wavelengths, wl_colors, file_format
+                    intensity_data, dolp_data, wavelengths, wl_colors, file_format, data_dict
                 )
 
             except Exception as e:

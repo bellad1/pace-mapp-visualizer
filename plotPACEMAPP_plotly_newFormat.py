@@ -1461,6 +1461,28 @@ def read_rsp_hdf5_variables(file_path):
                 if debug > 1:
                     print(f"Read sza (tiled) with shape {sza.shape}")
 
+            # Solar azimuth angles (for polar plot sun position)
+            if 'solar_azimuth' in f:
+                solar_azimuth_raw = f['solar_azimuth'][:]
+                if solar_azimuth_raw.ndim == 3 and solar_azimuth_raw.shape[1] == 1:
+                    solar_azimuth = solar_azimuth_raw[:, 0, :]
+                else:
+                    solar_azimuth = solar_azimuth_raw
+                data_dict['solar_azimuth'] = solar_azimuth
+                if debug > 1:
+                    print(f"Read solar_azimuth with shape {solar_azimuth.shape}")
+
+            # Sensor azimuth angles (for polar plot sensor viewing direction)
+            if 'sensor_azimuth' in f:
+                sensor_azimuth_raw = f['sensor_azimuth'][:]
+                if sensor_azimuth_raw.ndim == 3 and sensor_azimuth_raw.shape[1] == 1:
+                    sensor_azimuth = sensor_azimuth_raw[:, 0, :]
+                else:
+                    sensor_azimuth = sensor_azimuth_raw
+                data_dict['sensor_azimuth'] = sensor_azimuth
+                if debug > 1:
+                    print(f"Read sensor_azimuth with shape {sensor_azimuth.shape}")
+
             # Get measurement and model vectors for intensity and DoLP
             if 'ymvec' in f:
                 ymvec = f['ymvec'][:]
@@ -1948,6 +1970,10 @@ def get_channel_intensity_dolp_vza(data_dict, row_idx, col_idx):
     sza = data_dict['sza']
     raa = data_dict['raa']
 
+    # Extract solar and sensor azimuth if available (for polar plot overlays)
+    solar_azimuth = data_dict.get('solar_azimuth', None)
+    sensor_azimuth = data_dict.get('sensor_azimuth', None)
+
     # Get original 2D shape
     original_shape = data_dict['original_shape']
 
@@ -2023,6 +2049,16 @@ def get_channel_intensity_dolp_vza(data_dict, row_idx, col_idx):
         point_sza = sza[row_idx, col_idx, :]
         point_raa = raa[row_idx, col_idx, :]
 
+        # Extract solar and sensor azimuth if available
+        if solar_azimuth is not None:
+            point_solar_azimuth = solar_azimuth[row_idx, col_idx, :]
+        else:
+            point_solar_azimuth = None
+        if sensor_azimuth is not None:
+            point_sensor_azimuth = sensor_azimuth[row_idx, col_idx, :]
+        else:
+            point_sensor_azimuth = None
+
         # Validate expected length
         if len(point_vza) != total_intensity_angles:
             print("Warning: Expected angular data length {}, got {}".format(
@@ -2036,6 +2072,16 @@ def get_channel_intensity_dolp_vza(data_dict, row_idx, col_idx):
         point_vza = vza[row_idx, 0, :]  # squeeze out the middle dimension
         point_sza = sza[row_idx, 0, :]
         point_raa = raa[row_idx, 0, :]
+
+        # Extract solar and sensor azimuth if available
+        if solar_azimuth is not None:
+            point_solar_azimuth = solar_azimuth[row_idx, 0, :]
+        else:
+            point_solar_azimuth = None
+        if sensor_azimuth is not None:
+            point_sensor_azimuth = sensor_azimuth[row_idx, 0, :]
+        else:
+            point_sensor_azimuth = None
 
         # Validate expected length
         if len(point_vza) != total_intensity_angles:
@@ -2051,6 +2097,16 @@ def get_channel_intensity_dolp_vza(data_dict, row_idx, col_idx):
         point_vza_base = vza[row_idx, :]  # (num_angles,) e.g., (80,)
         point_sza_base = sza[row_idx, :]
         point_raa_base = raa[row_idx, :]
+
+        # Extract solar and sensor azimuth if available (untiled - no need to tile)
+        if solar_azimuth is not None:
+            point_solar_azimuth = solar_azimuth[row_idx, :]
+        else:
+            point_solar_azimuth = None
+        if sensor_azimuth is not None:
+            point_sensor_azimuth = sensor_azimuth[row_idx, :]
+        else:
+            point_sensor_azimuth = None
 
         # Tile to match total_intensity_angles (num_wavelengths × num_angles_per_wavelength)
         num_wavelengths = len([w for w, inst, _ in wavelength_mapping if inst != 'OCI'])
@@ -2185,9 +2241,12 @@ def get_channel_intensity_dolp_vza(data_dict, row_idx, col_idx):
         sza_rad = np.arccos(np.clip(sza_cos, -1, 1))
         vza_rad = np.radians(np.abs(vza_deg))
         raa_rad = np.radians(raa_deg)
-        cos_scatter = (-np.cos(sza_rad) * np.cos(vza_rad)
-                       - np.sin(sza_rad) * np.sin(vza_rad) * np.cos(raa_rad))
-        scattering_angle = np.degrees(np.arccos(np.clip(cos_scatter, -1, 1)))
+
+        # Suppress warnings for NaN values in trig functions (NaN values properly handled in output)
+        with np.errstate(invalid='ignore'):
+            cos_scatter = (-np.cos(sza_rad) * np.cos(vza_rad)
+                           - np.sin(sza_rad) * np.sin(vza_rad) * np.cos(raa_rad))
+            scattering_angle = np.degrees(np.arccos(np.clip(cos_scatter, -1, 1)))
         sza_deg_vals = np.degrees(sza_rad)
 
         # Collect data for this wavelength (backward compatible - existing code only uses 'x','y_meas','y_model')
@@ -2197,7 +2256,9 @@ def get_channel_intensity_dolp_vza(data_dict, row_idx, col_idx):
             'y_model': fvec_intensity_channels[wl_str],
             'sza': sza_deg_vals,
             'raa': raa_channels[wl_str],
-            'scattering_angle': scattering_angle
+            'scattering_angle': scattering_angle,
+            'solar_azimuth': point_solar_azimuth if point_solar_azimuth is not None else None,
+            'sensor_azimuth': point_sensor_azimuth if point_sensor_azimuth is not None else None
         }
         dolp_data[wl] = {
             'x': vza_channels[wl_str],
@@ -2205,7 +2266,9 @@ def get_channel_intensity_dolp_vza(data_dict, row_idx, col_idx):
             'y_model': fvec_dolp_channels[wl_str],
             'sza': sza_deg_vals,
             'raa': raa_channels[wl_str],
-            'scattering_angle': scattering_angle
+            'scattering_angle': scattering_angle,
+            'solar_azimuth': point_solar_azimuth if point_solar_azimuth is not None else None,
+            'sensor_azimuth': point_sensor_azimuth if point_sensor_azimuth is not None else None
         }
 
     return intensity_data, dolp_data, wavelengths
@@ -2479,6 +2542,10 @@ def create_angular_combined_plot(intensity_data, dolp_data, wavelengths, wl_colo
     x_key = x_key_map.get(x_axis_type, 'x')
     x_label = x_label_map.get(x_axis_type, 'Angle (degrees)')
 
+    # For scattering angle, use markers only (no lines) to avoid confusing patterns
+    # due to non-monotonic behavior
+    is_scattering = (x_axis_type == 'scattering_angle')
+
     fig = make_subplots(
         rows=2, cols=1,
         shared_xaxes=False,
@@ -2498,24 +2565,46 @@ def create_angular_combined_plot(intensity_data, dolp_data, wavelengths, wl_colo
                 y_meas = np.array(wl_data['y_meas'], dtype=float)
                 y_model = np.array(wl_data['y_model'], dtype=float)
                 sort_idx = np.argsort(x_vals)
-                fig.add_trace(go.Scatter(
-                    x=x_vals[sort_idx], y=y_meas[sort_idx],
-                    mode='lines+markers',
-                    name=f'{wl_str} nm',
-                    line=dict(color=color, width=2),
-                    marker=dict(color=color, size=6),
-                    legendgroup=wl_str,
-                    showlegend=True
-                ), row=1, col=1)
-                fig.add_trace(go.Scatter(
-                    x=x_vals[sort_idx], y=y_model[sort_idx],
-                    mode='lines+markers',
-                    name=f'{wl_str} nm',
-                    line=dict(color=color, width=2, dash='dashdot'),
-                    marker=dict(color=color, size=6),
-                    legendgroup=wl_str,
-                    showlegend=False
-                ), row=1, col=1)
+
+                if is_scattering:
+                    # Scattering angle: markers only, circle for measured
+                    fig.add_trace(go.Scatter(
+                        x=x_vals, y=y_meas,
+                        mode='markers',
+                        name=f'{wl_str} nm',
+                        marker=dict(color=color, size=8, symbol='circle'),
+                        legendgroup=wl_str,
+                        showlegend=True
+                    ), row=1, col=1)
+                    # Square for model
+                    fig.add_trace(go.Scatter(
+                        x=x_vals, y=y_model,
+                        mode='markers',
+                        name=f'{wl_str} nm',
+                        marker=dict(color=color, size=8, symbol='square'),
+                        legendgroup=wl_str,
+                        showlegend=False
+                    ), row=1, col=1)
+                else:
+                    # Other angles: lines+markers
+                    fig.add_trace(go.Scatter(
+                        x=x_vals[sort_idx], y=y_meas[sort_idx],
+                        mode='lines+markers',
+                        name=f'{wl_str} nm',
+                        line=dict(color=color, width=2),
+                        marker=dict(color=color, size=6),
+                        legendgroup=wl_str,
+                        showlegend=True
+                    ), row=1, col=1)
+                    fig.add_trace(go.Scatter(
+                        x=x_vals[sort_idx], y=y_model[sort_idx],
+                        mode='lines+markers',
+                        name=f'{wl_str} nm',
+                        line=dict(color=color, width=2, dash='dashdot'),
+                        marker=dict(color=color, size=6),
+                        legendgroup=wl_str,
+                        showlegend=False
+                    ), row=1, col=1)
 
         # DoLP subplot (row 2) — same legendgroup, hidden from legend
         if wl in dolp_data:
@@ -2525,24 +2614,52 @@ def create_angular_combined_plot(intensity_data, dolp_data, wavelengths, wl_colo
                 y_meas = np.array(wl_data['y_meas'], dtype=float)
                 y_model = np.array(wl_data['y_model'], dtype=float)
                 sort_idx = np.argsort(x_vals)
-                fig.add_trace(go.Scatter(
-                    x=x_vals[sort_idx], y=y_meas[sort_idx],
-                    mode='lines+markers',
-                    name=f'{wl_str} nm',
-                    line=dict(color=color, width=2),
-                    marker=dict(color=color, size=6),
-                    legendgroup=wl_str,
-                    showlegend=False
-                ), row=2, col=1)
-                fig.add_trace(go.Scatter(
-                    x=x_vals[sort_idx], y=y_model[sort_idx],
-                    mode='lines+markers',
-                    name=f'{wl_str} nm',
-                    line=dict(color=color, width=2, dash='dashdot'),
-                    marker=dict(color=color, size=6),
-                    legendgroup=wl_str,
-                    showlegend=False
-                ), row=2, col=1)
+
+                if is_scattering:
+                    # Scattering angle: markers only, circle for measured
+                    fig.add_trace(go.Scatter(
+                        x=x_vals, y=y_meas,
+                        mode='markers',
+                        name=f'{wl_str} nm',
+                        marker=dict(color=color, size=8, symbol='circle'),
+                        legendgroup=wl_str,
+                        showlegend=False
+                    ), row=2, col=1)
+                    # Square for model
+                    fig.add_trace(go.Scatter(
+                        x=x_vals, y=y_model,
+                        mode='markers',
+                        name=f'{wl_str} nm',
+                        marker=dict(color=color, size=8, symbol='square'),
+                        legendgroup=wl_str,
+                        showlegend=False
+                    ), row=2, col=1)
+                else:
+                    # Other angles: lines+markers
+                    fig.add_trace(go.Scatter(
+                        x=x_vals[sort_idx], y=y_meas[sort_idx],
+                        mode='lines+markers',
+                        name=f'{wl_str} nm',
+                        line=dict(color=color, width=2),
+                        marker=dict(color=color, size=6),
+                        legendgroup=wl_str,
+                        showlegend=False
+                    ), row=2, col=1)
+                    fig.add_trace(go.Scatter(
+                        x=x_vals[sort_idx], y=y_model[sort_idx],
+                        mode='lines+markers',
+                        name=f'{wl_str} nm',
+                        line=dict(color=color, width=2, dash='dashdot'),
+                        marker=dict(color=color, size=6),
+                        legendgroup=wl_str,
+                        showlegend=False
+                    ), row=2, col=1)
+
+    # Legend text depends on whether we're using lines or markers
+    if is_scattering:
+        legend_text = "<b>Wavelengths </b>(○ Circle: Measured, □ Square: Modeled)</b>"
+    else:
+        legend_text = "<b>Wavelengths </b>" + "(Solid: Measured, - - Dashed: Modeled)</b>"
 
     fig.update_layout(
         title=f'{title} — Intensity & DoLP vs {x_label_map.get(x_axis_type, "")}',
@@ -2558,7 +2675,7 @@ def create_angular_combined_plot(intensity_data, dolp_data, wavelengths, wl_colo
             bordercolor="rgba(0,0,0,0.3)",
             borderwidth=1,
             title=dict(
-                text="<b>Wavelengths </b>" + "(Solid: Measured, - - Dashed: Modeled)</b>",
+                text=legend_text,
                 font=dict(size=14, family="Arial", color="black"),
                 side="top"
             )
@@ -2623,6 +2740,65 @@ def create_polar_angular_plot(intensity_data, dolp_data, wavelengths, wl_colors,
                            f'<br>RAA: %{{theta:.1f}}°'
                            f'<br>{y_label}: %{{marker.color:.5f}}<extra></extra>')
         ))
+
+    # Add solar position as a star marker (mean solar azimuth and zenith)
+    # Extract from first wavelength (same for all wavelengths)
+    if len(wavelengths) > 0:
+        first_wl = wavelengths[0]
+        if first_wl in data and 'solar_azimuth' in data[first_wl] and data[first_wl]['solar_azimuth'] is not None:
+            solar_azimuth = np.array(data[first_wl]['solar_azimuth'], dtype=float)
+            solar_zenith = np.array(data[first_wl]['sza'], dtype=float)  # SZA in degrees
+
+            # Compute mean solar position (only if valid data exists)
+            if np.any(np.isfinite(solar_azimuth)) and np.any(np.isfinite(solar_zenith)):
+                mean_solar_azimuth = np.nanmean(solar_azimuth)
+                mean_solar_zenith = np.nanmean(solar_zenith)
+
+                # Only plot if mean is finite (not NaN or inf)
+                if np.isfinite(mean_solar_azimuth) and np.isfinite(mean_solar_zenith):
+                    # Add star marker for sun
+                    fig.add_trace(go.Scatterpolar(
+                        r=[mean_solar_zenith],
+                        theta=[mean_solar_azimuth],
+                        mode='markers',
+                        name='Sun',
+                        marker=dict(
+                            symbol='star',
+                            size=20,
+                            color='gold',
+                            line=dict(color='orange', width=2)
+                        ),
+                        hovertemplate=f'Sun<br>SZA: {mean_solar_zenith:.1f}°<br>Solar Azimuth: {mean_solar_azimuth:.1f}°<extra></extra>',
+                        showlegend=True
+                    ))
+
+    # Add sensor viewing direction as a solid black line
+    if len(wavelengths) > 0:
+        first_wl = wavelengths[0]
+        if first_wl in data and 'sensor_azimuth' in data[first_wl] and data[first_wl]['sensor_azimuth'] is not None:
+            sensor_azimuth = np.array(data[first_wl]['sensor_azimuth'], dtype=float)
+            sensor_zenith = np.abs(np.array(data[first_wl]['x'], dtype=float))  # |VZA| in degrees
+
+            # Filter out NaN values before plotting
+            valid_mask = np.isfinite(sensor_azimuth) & np.isfinite(sensor_zenith)
+            if np.any(valid_mask):
+                valid_azimuth = sensor_azimuth[valid_mask]
+                valid_zenith = sensor_zenith[valid_mask]
+
+                # Sort by azimuth for clean line rendering
+                sort_idx = np.argsort(valid_azimuth)
+
+                # Add line showing sensor viewing directions
+                fig.add_trace(go.Scatterpolar(
+                    r=valid_zenith[sort_idx],
+                    theta=valid_azimuth[sort_idx],
+                    mode='lines+markers',
+                    name='Sensor View',
+                    line=dict(color='black', width=2),
+                    marker=dict(size=4, color='black'),
+                    hovertemplate='Sensor<br>VZA: %{r:.1f}°<br>Sensor Azimuth: %{theta:.1f}°<extra></extra>',
+                    showlegend=True
+                ))
 
     fig.update_layout(
         title=f'{title} — Polar ({y_label}: measured)',
@@ -2856,7 +3032,7 @@ def create_scatter_plot_only(data_dict, selected_property, original_indices, cli
     fig.update_layout(
         title="",
         map=dict(
-            style="open-street-map",
+            style="carto-positron",
             center=dict(lat=center_lat, lon=center_lon),
             # zoom=4.35
             zoom=4.0
@@ -2985,7 +3161,7 @@ def create_image_swath_scatter(pace_data_dict, rsp_data_dict, matching_results, 
         uirevision="preserve-zoom",
         title="",
         map=dict(
-            style="open-street-map",
+            style="carto-positron",
             center=dict(lat=center_lat, lon=center_lon),
             zoom=4.0
         ),
@@ -3001,7 +3177,7 @@ def create_image_swath_scatter(pace_data_dict, rsp_data_dict, matching_results, 
 def compute_scattering_angle_values(data_dict, x_axis_type):
     """
     Compute a single per-pixel value for each spatial point, suitable for
-    coloring the scatter map in Angular Dependence Analysis mode.
+    coloring the scatter map in Solar and Instrument Geometry mode.
 
     Args:
         data_dict: data dictionary (filtered)
@@ -3080,9 +3256,11 @@ def compute_scattering_angle_values(data_dict, x_axis_type):
             vza_rad = np.radians(np.abs(vza_vals))
             raa_rad = np.radians(raa_vals)
 
-            cos_scatter = (-np.cos(sza_rad) * np.cos(vza_rad)
-                           - np.sin(sza_rad) * np.sin(vza_rad) * np.cos(raa_rad))
-            scatter_angles = np.degrees(np.arccos(np.clip(cos_scatter, -1, 1)))
+            # Suppress warnings for NaN values in trig functions (handled by nanmean below)
+            with np.errstate(invalid='ignore'):
+                cos_scatter = (-np.cos(sza_rad) * np.cos(vza_rad)
+                               - np.sin(sza_rad) * np.sin(vza_rad) * np.cos(raa_rad))
+                scatter_angles = np.degrees(np.arccos(np.clip(cos_scatter, -1, 1)))
             values = np.nanmean(scatter_angles, axis=-1).flatten()
 
         else:
@@ -3100,8 +3278,8 @@ def compute_scattering_angle_values(data_dict, x_axis_type):
 def create_angular_scatter_plot(filtered_data, color_values, color_label, clicked_point_data=None):
     """
     Scatter map colored by an angular quantity (SZA, VZA, RAA, or scattering angle)
-    instead of a retrieval property. Same Scattermap + OpenStreetMap style as
-    create_scatter_plot_only().
+    instead of a retrieval property. Same Scattermap style (CartoDB Positron basemap)
+    as create_scatter_plot_only().
 
     Args:
         filtered_data: data dict (must contain 'latitude', 'longitude')
@@ -3182,7 +3360,7 @@ def create_angular_scatter_plot(filtered_data, color_values, color_label, clicke
     fig.update_layout(
         uirevision='angular-scatter',
         map=dict(
-            style='open-street-map',
+            style='carto-positron',
             center=dict(lat=center_lat, lon=center_lon),
             zoom=4.0
         ),
@@ -4900,7 +5078,7 @@ def create_export_figure(data_dict, selected_property, original_indices,
 
         # Setup the map style
         map=dict(
-            style="open-street-map",
+            style="carto-positron",
             center=dict(
                 # lat=np.mean(data_dict['latitude']),
                 # lon=np.mean(data_dict['longitude'])
@@ -6118,8 +6296,8 @@ def run_app(initial_file_path, directory_path):
         if analysis_mode == 'multiple':
             base_options.append({'label': 'Image/Swath Comparison', 'value': 'image_swath'})
 
-        # Angular Dependence Analysis available in all modes
-        base_options.append({'label': 'Angular Dependence Analysis', 'value': 'angular_dependence'})
+        # Solar and Instrument Geometry available in all modes
+        base_options.append({'label': 'Solar and Instrument Geometry', 'value': 'angular_dependence'})
 
         return base_options
 
@@ -7133,7 +7311,7 @@ def run_app(initial_file_path, directory_path):
                                         max_cost, plot_type, x_axis_type,
                                         click_multi, click_single):
         """
-        Angular Dependence Analysis: scatter maps colored by selected angular
+        Solar and Instrument Geometry: scatter maps colored by selected angular
         quantity; Intensity, DoLP, and polar plots for the clicked point.
         Works in both single-file and multi-file modes.
         """

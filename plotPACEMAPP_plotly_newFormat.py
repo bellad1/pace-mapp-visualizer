@@ -2567,12 +2567,12 @@ def create_angular_combined_plot(intensity_data, dolp_data, wavelengths, wl_colo
                 sort_idx = np.argsort(x_vals)
 
                 if is_scattering:
-                    # Scattering angle: markers only, circle for measured
+                    # Scattering angle: markers only, star for measured
                     fig.add_trace(go.Scatter(
                         x=x_vals, y=y_meas,
                         mode='markers',
                         name=f'{wl_str} nm',
-                        marker=dict(color=color, size=8, symbol='circle'),
+                        marker=dict(color=color, size=8, symbol='star'),
                         legendgroup=wl_str,
                         showlegend=True
                     ), row=1, col=1)
@@ -2616,12 +2616,12 @@ def create_angular_combined_plot(intensity_data, dolp_data, wavelengths, wl_colo
                 sort_idx = np.argsort(x_vals)
 
                 if is_scattering:
-                    # Scattering angle: markers only, circle for measured
+                    # Scattering angle: markers only, star for measured
                     fig.add_trace(go.Scatter(
                         x=x_vals, y=y_meas,
                         mode='markers',
                         name=f'{wl_str} nm',
-                        marker=dict(color=color, size=8, symbol='circle'),
+                        marker=dict(color=color, size=8, symbol='star'),
                         legendgroup=wl_str,
                         showlegend=False
                     ), row=2, col=1)
@@ -2657,7 +2657,7 @@ def create_angular_combined_plot(intensity_data, dolp_data, wavelengths, wl_colo
 
     # Legend text depends on whether we're using lines or markers
     if is_scattering:
-        legend_text = "<b>Wavelengths </b>(○ Circle: Measured, □ Square: Modeled)</b>"
+        legend_text = "<b>Wavelengths </b>(☆ Star: Measured, □ Square: Modeled)</b>"
     else:
         legend_text = "<b>Wavelengths </b>" + "(Solid: Measured, - - Dashed: Modeled)</b>"
 
@@ -2792,7 +2792,8 @@ def create_polar_angular_plot(intensity_data, dolp_data, wavelengths, wl_colors,
                 fig.add_trace(go.Scatterpolar(
                     r=valid_zenith[sort_idx],
                     theta=valid_azimuth[sort_idx],
-                    mode='lines+markers',
+                    # mode='lines+markers',
+                    mode='markers',
                     name='Sensor View',
                     line=dict(color='black', width=2),
                     marker=dict(size=4, color='black'),
@@ -3034,8 +3035,8 @@ def create_scatter_plot_only(data_dict, selected_property, original_indices, cli
         map=dict(
             style="carto-positron",
             center=dict(lat=center_lat, lon=center_lon),
-            # zoom=4.35
-            zoom=4.0
+            zoom=4.75
+            # zoom=4.0
         ),
         margin=dict(
             l=0,
@@ -3365,8 +3366,8 @@ def create_angular_scatter_plot(filtered_data, color_values, color_label, clicke
             zoom=4.0
         ),
         margin=dict(l=0, r=0, t=30, b=0),
-        autosize=True,
-        height=600
+        autosize=True
+        # Height controlled by dcc.Graph component style, not figure layout
     )
     return fig
 
@@ -3528,7 +3529,6 @@ def create_combined_intensity_dolp_plot(intensity_data, dolp_data, wavelengths, 
     return fig
 
 
-# Create the total aod plot
 def create_aod_total_plot(data_dict, selected_row, selected_col):
     """
     Create a plot showing total AOD as a function of wavelength for the selected point
@@ -4045,13 +4045,14 @@ def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode=
                 fig.add_trace(go.Scatter(
                     x=time_subset,
                     y=property_subset,
-                    mode='lines+markers',
+                    # mode='lines+markers',
+                    mode='markers',
                     name=f'{int(wl)} nm',
                     line=dict(color=wl_colors.get(wl, '#000000'), width=2),
                     marker=dict(size=8),
                     connectgaps=False,
                     customdata=customdata_list,
-                    hovertemplate=f'<b>Time:</b> %{{x:.2f}} UTC<br><b>Wavelength:</b> {int(wl)} nm<br><b>{prop_info["display_name"]}:</b> %{{y:.{prop_info["decimals"]}f}}<extra></extra>'
+                    hovertemplate=f'<b>Time:</b> %{{x:.3f}} UTC<br><b>Wavelength:</b> {int(wl)} nm<br><b>{prop_info["display_name"]}:</b> %{{y:.{prop_info["decimals"]}f}}<extra></extra>'
                 ))
 
         else:
@@ -4098,13 +4099,14 @@ def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode=
                     fig.add_trace(go.Scatter(
                         x=time_subset,
                         y=property_subset,
-                        mode='lines+markers',
+                        # mode='lines+markers',
+                        mode='markers',
                         name=f'{mode.capitalize()} Mode',
                         line=dict(color=mode_colors.get(mode, '#000000'), width=2),
                         marker=dict(size=8),
                         connectgaps=False,
                         customdata=customdata_list,
-                        hovertemplate=f'<b>Time:</b> %{{x:.2f}} UTC<br><b>Mode:</b> {mode.capitalize()}<br><b>{prop_info["display_name"]}:</b> %{{y:.{prop_info["decimals"]}f}}<extra></extra>'
+                        hovertemplate=f'<b>Time:</b> %{{x:.3f}} UTC<br><b>Mode:</b> {mode.capitalize()}<br><b>{prop_info["display_name"]}:</b> %{{y:.{prop_info["decimals"]}f}}<extra></extra>'
                     ))
 
             if not any_valid_data:
@@ -4238,7 +4240,7 @@ def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode=
 
 
 def create_property_vs_index_plot(data_dict, matching_results, selected_property,
-                                   dataset_label, is_rsp=True):
+                                  dataset_label, is_rsp=True):
     """
     Create Property vs Point Index plot for Image/Swath comparison.
 
@@ -4287,7 +4289,7 @@ def create_property_vs_index_plot(data_dict, matching_results, selected_property
         lons = matching_results['pace_lons']
         # Store PACE (row, col) for reference
         customdata = [[int(r), int(c)] for r, c in zip(matching_results['pace_rows'],
-                                                        matching_results['pace_cols'])]
+                                                       matching_results['pace_cols'])]
 
     # X-axis: point index (0, 1, 2, ...)
     point_indices = np.arange(len(prop_values))
@@ -4302,7 +4304,8 @@ def create_property_vs_index_plot(data_dict, matching_results, selected_property
     fig.add_trace(go.Scatter(
         x=point_indices,
         y=prop_values,
-        mode='lines+markers',
+        # mode='lines+markers',
+        mode='markers',
         marker=dict(size=8, color=prop_values, colorscale='Viridis'),
         line=dict(width=2),
         customdata=customdata,
@@ -4509,7 +4512,6 @@ def create_polarized_reflectance_comparison_plot(intensity_data_1, dolp_data_1,
     return fig
 
 
-# Create AOD Histogram
 def create_aod_histogram(data_dict, selected_property, max_cost, bin_size=0.1):
     """
     Create histogram of AOD values for selected wavelength with cost filtering
@@ -4631,9 +4633,6 @@ def create_polarized_reflectance_plot(intensity_data, dolp_data, wavelengths, wl
     Create a plot showing polarized reflectance (DoLP — Intensity) vs VZA
     with both measured and modeled data
     """
-
-    DEBUG_PLOTTING = False
-
     # Create single plot
     fig = go.Figure()
 
@@ -4686,9 +4685,9 @@ def create_polarized_reflectance_plot(intensity_data, dolp_data, wavelengths, wl
 
     # Update layout
     fig.update_layout(
-        title="Polarized Reflectance (DoLP — Intensity) vs Viewing Zenith Angle",
+        title="Polarized Reflectance (DoLP * Intensity) vs Viewing Zenith Angle",
         xaxis_title="Viewing Zenith Angle (degrees)",
-        yaxis_title="Polarized Reflectance (DoLP — Intensity)",
+        yaxis_title="Polarized Reflectance (DoLP * Intensity)",
         height=800,
         showlegend=True,
         margin=dict(l=50, r=40, t=60, b=40),
@@ -5797,28 +5796,15 @@ def run_app(initial_file_path, directory_path):
                     'marginBottom': '5px'
                 }),
 
-                # Selected point properties section
-                html.Div([
-                    html.H3("Selected Point Properties", style={
-                        'margin': '0 0 15px 0',
-                        'color': '#34495e',
-                        'fontSize': '18px',
-                        'textDecoration': 'underline',
-                        'display': 'inline-block'
-                    }),
-                    html.Div(id='click-info', style={'marginBottom': '15px', 'fontSize': '14px'}),
-                    html.Div(id='panel-properties-table', style={'maxHeight': '400px', 'overflowY': 'auto'}),
-                ], id='selected-properties-container', style={
-                    'padding': '15px',
-                    'border': '1px solid #bdc3c7',
-                    'borderRadius': '5px',
-                    'backgroundColor': '#ffffff',
-                    'display': 'none'  # Hidden by default until file loaded and point clicked
-                }),
+                # (Selected point properties section moved to plot-scatter container for consistency)
 
             ], style={
                 'flex': '0 0 25%',
-                'marginRight': '1%'
+                'marginRight': '1%',
+                'height': 'calc(100vh - 100px)',  # Fixed height (viewport - header)
+                'overflowY': 'auto',  # Scrollable if controls exceed viewport
+                'position': 'sticky',  # Stick to viewport when scrolling
+                'top': '20px'  # Offset from top
             }),
 
             # ============================================================
@@ -5835,7 +5821,9 @@ def run_app(initial_file_path, directory_path):
                            style={'textAlign': 'center', 'marginRight': '10%', 'marginLeft': '10%'}),
                 ], id='plot-about', style={'display': 'block', 'padding': '40px'}),
 
-                # Scatter + Intensity/DoLP plots container
+                # -------------------------------------------------------
+                # SCATTER + INTENSITY/DOLP PLOTS CONTAINER
+                # -------------------------------------------------------
                 html.Div([
                     # Multi-file comparison mode
                     html.Div([
@@ -5924,27 +5912,71 @@ def run_app(initial_file_path, directory_path):
                             'paddingTop': '40px'
                         }),
 
-                    # Single file mode
+                    # Single file mode: centered single column layout
                     html.Div([
-                        # Middle column - Scatter plot
+                        # Scatter plot (top) with file name header
                         html.Div([
+                            # html.H4("", id='scatter-file-header-single', style={'textAlign': 'center'}),
+                            html.H4("", id='scatter-file-header-single', style={'textAlign': 'center', 'margin': '0 0 10px 0'}),
                             dcc.Graph(
                                 id='aerosol-plot',
                                 figure=create_placeholder_figure("Please select a file to view the scatter plot"),
-                                style={'height': '800px', 'border': '1px solid #bdc3c7', 'borderRadius': '5px'}
+                                style={'height': '500px'}
                             ),
-                        ], style={'width': '42%', 'display': 'inline-block', 'marginRight': '1%', 'verticalAlign': 'top'}),
+                            # Instruction text
+                            html.P(
+                                "Click a point on the map above to view Intensity/DoLP plots and properties below",
+                                style={
+                                    'textAlign': 'center',
+                                    'color': '#e74c3c',
+                                    'fontSize': '16px',
+                                    'fontWeight': 'bold',
+                                    'marginTop': '10px',
+                                    'marginBottom': '0'
+                                }
+                            ),
+                        ], style={'marginBottom': '25px'}),
 
-                        # Right column - Combined intensity and DoLP plot
+                        # Property table (middle, shown when point is clicked)
+                        html.Div([
+                            html.H3("Selected Point Properties", style={
+                                'margin': '20px 0 15px 0',
+                                'color': '#34495e',
+                                'fontSize': '18px',
+                                'textDecoration': 'underline',
+                                'textAlign': 'center'
+                            }),
+                            html.Div(id='click-info', style={
+                                'marginBottom': '15px',
+                                'fontSize': '14px',
+                                'textAlign': 'center'
+                            }),
+                            html.Div(id='panel-properties-table', style={
+                                'maxHeight': '400px',
+                                'overflowY': 'auto'
+                            }),
+                        ], id='selected-properties-container', style={
+                            'padding': '15px',
+                            'border': '1px solid #bdc3c7',
+                            'borderRadius': '5px',
+                            'backgroundColor': '#ffffff',
+                            'marginTop': '20px',
+                            'marginBottom': '25px',
+                            'display': 'none'  # Hidden until point clicked
+                        }),
+
+                        # Intensity and DoLP combined plot (bottom)
                         html.Div([
                             dcc.Graph(
                                 id='combined-plot',
                                 figure=create_placeholder_figure(""),
-                                style={'height': '800px', 'border': '1px solid #bdc3c7', 'borderRadius': '5px'}
+                                style={'height': '1000px'}
                             ),
-                        ], style={'width': '57%', 'display': 'inline-block', 'verticalAlign': 'top'}),
+                        ], style={'marginBottom': '25px'}),
                     ], id='single-file-plots-container', style={'display': 'block'}),
+
                 ], id='plot-scatter', style={'display': 'none'}),
+                # -- end of SCATTER + INTENSITY/DOLP PLOTS CONTAINER --
 
                 # Polarized Reflectance plot
                 html.Div([
@@ -6097,7 +6129,8 @@ def run_app(initial_file_path, directory_path):
                     # Property vs Index plots (side-by-side)
                     html.Div([
                         html.Div([
-                            html.H4("", id='rsp-index-header', style={'textAlign': 'center'}),
+                            # html.H4("", id='rsp-index-header', style={'textAlign': 'center'}),
+                            html.H4("", id='rsp-index-header', style={'textAlign': 'center', 'margin': '0 0 10px 0'}),
                             dcc.Graph(id='property-index-plot-rsp', style={'height': '600px'})
                         ], style={'width': '49%', 'display': 'inline-block', 'verticalAlign': 'top'}),
 
@@ -6167,8 +6200,22 @@ def run_app(initial_file_path, directory_path):
 
                     # ---- SCATTER MAP (single-file mode) ----
                     html.Div([
-                        html.H4("", id='angular-file-1-header-single', style={'textAlign': 'center'}),
-                        dcc.Graph(id='angular-scatter-plot-single', style={'height': '600px'})
+                        # html.H4("", id='angular-file-1-header-single', style={'textAlign': 'center'}),
+                        html.H4("", id='angular-file-1-header-single', style={'textAlign': 'center', 'margin': '0 0 10px 0'}),
+                        # dcc.Graph(id='angular-scatter-plot-single', style={'height': '600px'})
+                        dcc.Graph(id='angular-scatter-plot-single', style={'height': '500px'}),
+                        # Instruction text
+                        html.P(
+                            "Click a point on the map above to view angular plots and properties below",
+                            style={
+                                'textAlign': 'center',
+                                'color': '#e74c3c',
+                                'fontSize': '16px',
+                                'fontWeight': 'bold',
+                                'marginTop': '10px',
+                                'marginBottom': '0'
+                            }
+                        ),
                     ], id='angular-scatter-single', style={'display': 'block', 'marginBottom': '25px'}),
 
                     # ---- ANGULAR QUANTITY DROPDOWN (between scatter and line plots) ----
@@ -6230,19 +6277,101 @@ def run_app(initial_file_path, directory_path):
                         ]),
                     ], id='angular-single-bottom', style={'display': 'block'}),
 
+                    # ---- PROPERTY TABLES ----
+                    # Single-file mode property table
+                    html.Div([
+                        html.H3("Selected Point Properties", style={
+                            'margin': '20px 0 15px 0',
+                            'color': '#34495e',
+                            'fontSize': '18px',
+                            'textDecoration': 'underline',
+                            'textAlign': 'center'
+                        }),
+                        html.Div(id='angular-click-info-single', style={
+                            'marginBottom': '15px',
+                            'fontSize': '14px',
+                            'textAlign': 'center'
+                        }),
+                        html.Div(id='angular-properties-table-single', style={
+                            'maxHeight': '400px',
+                            'overflowY': 'auto'
+                        }),
+                    ], id='angular-properties-container-single', style={
+                        'padding': '15px',
+                        'border': '1px solid #bdc3c7',
+                        'borderRadius': '5px',
+                        'backgroundColor': '#ffffff',
+                        'marginTop': '20px',
+                        'maxWidth': '1200px',
+                        'margin': '20px auto',
+                        'display': 'none'  # Hidden until point clicked
+                    }),
+
+                    # Multi-file mode property tables (side-by-side)
+                    html.Div([
+                        html.H3("Selected Point Properties", style={
+                            'margin': '20px 0 15px 0',
+                            'color': '#34495e',
+                            'fontSize': '18px',
+                            'textDecoration': 'underline',
+                            'textAlign': 'center'
+                        }),
+                        html.Div([
+                            # File 1 properties
+                            html.Div([
+                                html.H4("File 1 (Clicked Point)", style={'textAlign': 'center', 'color': '#2980b9'}),
+                                html.Div(id='angular-click-info-multi-1', style={
+                                    'marginBottom': '15px',
+                                    'fontSize': '14px',
+                                    'textAlign': 'center'
+                                }),
+                                html.Div(id='angular-properties-table-multi-1', style={
+                                    'maxHeight': '400px',
+                                    'overflowY': 'auto'
+                                }),
+                            ], style={'width': '49%', 'display': 'inline-block', 'verticalAlign': 'top'}),
+                            # File 2 properties
+                            html.Div([
+                                html.H4("File 2 (Matched Point)", style={'textAlign': 'center', 'color': '#27ae60'}),
+                                html.Div(id='angular-click-info-multi-2', style={
+                                    'marginBottom': '15px',
+                                    'fontSize': '14px',
+                                    'textAlign': 'center'
+                                }),
+                                html.Div(id='angular-properties-table-multi-2', style={
+                                    'maxHeight': '400px',
+                                    'overflowY': 'auto'
+                                }),
+                            ], style={'width': '49%', 'display': 'inline-block', 'verticalAlign': 'top', 'marginLeft': '2%'}),
+                        ]),
+                    ], id='angular-properties-container-multi', style={
+                        'padding': '15px',
+                        'border': '1px solid #bdc3c7',
+                        'borderRadius': '5px',
+                        'backgroundColor': '#ffffff',
+                        'marginTop': '20px',
+                        'maxWidth': '1400px',
+                        'margin': '20px auto',
+                        'display': 'none'  # Hidden until point clicked
+                    }),
+
                 ], id='plot-angular-dependence', style={'display': 'none'}),
 
             ], style={
-                'flex': '0 0 74%'
+                'flex': '1',  # Take remaining space
+                'height': 'calc(100vh - 100px)',  # Fixed height (viewport - header)
+                'overflowY': 'auto',  # Scrollable content area
+                'overflowX': 'hidden'  # Prevent horizontal scroll
             }),
 
         ], style={
             'display': 'flex',
             'flexDirection': 'row',
             'padding': '0 20px',
-            'gap': '0px'
+            'gap': '0px',
+            'height': 'calc(100vh - 80px)'  # Container takes full viewport height minus header
         }),
-    ], style={'backgroundColor': '#ecf0f1', 'minHeight': '100vh', 'padding': '20px 0'})
+    ], style={'backgroundColor': '#ecf0f1', 'height': '100vh', 'padding': '20px 0', 'overflow': 'hidden'})
     # END of APP LAYOUT
 
     # Begin Callbacks
@@ -6267,6 +6396,7 @@ def run_app(initial_file_path, directory_path):
         base_options = [
             {'label': 'About', 'value': 'about'},
             {'label': 'Scatter + Intensity/DoLP', 'value': 'scatter'},
+            {'label': 'Solar and Instrument Geometry', 'value': 'angular_dependence'},
             {'label': 'Polarized Reflectance', 'value': 'polarized'},
             {'label': 'Residual Analysis', 'value': 'residual'},
             {'label': 'Histogram', 'value': 'histogram'},
@@ -6297,7 +6427,8 @@ def run_app(initial_file_path, directory_path):
             base_options.append({'label': 'Image/Swath Comparison', 'value': 'image_swath'})
 
         # Solar and Instrument Geometry available in all modes
-        base_options.append({'label': 'Solar and Instrument Geometry', 'value': 'angular_dependence'})
+        # Adam: added above to improve the order of items
+        # base_options.append({'label': 'Solar and Instrument Geometry', 'value': 'angular_dependence'})
 
         return base_options
 
@@ -7296,7 +7427,17 @@ def run_app(initial_file_path, directory_path):
          Output('angular-polar-intensity-plot-single', 'figure'),
          Output('angular-file-1-scatter-header', 'children'),
          Output('angular-file-2-scatter-header', 'children'),
-         Output('angular-file-1-header-single', 'children')],
+         Output('angular-file-1-header-single', 'children'),
+         # Property table outputs (single-file mode)
+         Output('angular-properties-container-single', 'style'),
+         Output('angular-click-info-single', 'children'),
+         Output('angular-properties-table-single', 'children'),
+         # Property table outputs (multi-file mode)
+         Output('angular-properties-container-multi', 'style'),
+         Output('angular-click-info-multi-1', 'children'),
+         Output('angular-properties-table-multi-1', 'children'),
+         Output('angular-click-info-multi-2', 'children'),
+         Output('angular-properties-table-multi-2', 'children')],
         [Input('individual-analysis-mode', 'value'),
          Input('file-selector', 'value'),
          Input('individual-file-selector-2', 'value'),
@@ -7321,11 +7462,14 @@ def run_app(initial_file_path, directory_path):
         click_msg = create_placeholder_figure("Click a point on the map to view angular plots")
 
         n_empty = 9  # total figure outputs (3 each: scatter, combined, polar-intensity)
+        hidden_style = {'display': 'none'}
         default_returns = (
             {'display': 'none'}, {'display': 'block'},   # scatter-multi, scatter-single
             {'display': 'none'}, {'display': 'block'},   # bottom-multi, bottom-single
             *([empty_fig] * n_empty),                    # all figures
-            "", "", ""                                    # headers
+            "", "", "",                                   # headers
+            hidden_style, "", "",                         # properties-container-single, click-info-single, table-single
+            hidden_style, "", "", "", ""                  # properties-container-multi, click-info-1, table-1, click-info-2, table-2
         )
 
         # Early return if not this plot type
@@ -7345,8 +7489,8 @@ def run_app(initial_file_path, directory_path):
             click_single = None
 
         is_multi = (analysis_mode == 'multiple')
-        scatter_multi_style = {'display': 'block'} if is_multi else {'display': 'none'}
-        scatter_single_style = {'display': 'none'} if is_multi else {'display': 'block'}
+        scatter_multi_style = {'display': 'block', 'marginBottom': '25px'} if is_multi else {'display': 'none'}
+        scatter_single_style = {'display': 'none'} if is_multi else {'display': 'block', 'marginBottom': '25px'}
         bottom_multi_style = {'display': 'block'} if is_multi else {'display': 'none'}
         bottom_single_style = {'display': 'none'} if is_multi else {'display': 'block'}
 
@@ -7356,9 +7500,12 @@ def run_app(initial_file_path, directory_path):
             # ---- SINGLE-FILE MODE ----
             if not is_multi:
                 if file_path_1 is None:
+                    # Hide bottom plots when no file selected
                     return (scatter_multi_style, scatter_single_style,
-                            bottom_multi_style, bottom_single_style,
-                            *([click_msg] * n_empty), "", "", "")
+                            {'display': 'none'}, {'display': 'none'},  # Hide bottom containers
+                            *([click_msg] * n_empty), "", "", "",
+                            hidden_style, "", "",  # single properties
+                            hidden_style, "", "", "", "")  # multi properties
 
                 cached = get_cached_data(file_path_1)
                 data_dict = cached['data_dict']
@@ -7395,12 +7542,15 @@ def run_app(initial_file_path, directory_path):
                 )
 
                 if clicked_point_data is None:
+                    # Hide bottom plots until point is clicked to prevent layout compression
                     return (scatter_multi_style, scatter_single_style,
-                            bottom_multi_style, bottom_single_style,
+                            {'display': 'none'}, {'display': 'none'},  # Hide bottom containers
                             empty_fig, empty_fig, scatter_fig,
                             click_msg, click_msg, click_msg,
                             click_msg, click_msg, click_msg,
-                            "", "", fname)
+                            "", "", fname,
+                            hidden_style, "", "",  # single properties
+                            hidden_style, "", "", "", "")  # multi properties
 
                 sel_row = clicked_point_data['row']
                 sel_col = clicked_point_data['col']
@@ -7417,17 +7567,45 @@ def run_app(initial_file_path, directory_path):
                     intensity_data, dolp_data, wavelengths, wl_colors, 'intensity', fname
                 )
 
+                # Generate property table for clicked point
+                properties_table_single = create_properties_table_compact(
+                    filtered_data, sel_row, sel_col, 'aod_fine'
+                )
+                # Create click info with location
+                original_shape = data_dict['original_shape']
+                if len(original_shape) == 1:
+                    lat = data_dict['latitude'][sel_row]
+                    lon = data_dict['longitude'][sel_row]
+                else:
+                    lat = data_dict['latitude'][sel_row, sel_col]
+                    lon = data_dict['longitude'][sel_row, sel_col]
+                click_info_single = f"Location: {lat:.4f}°N, {lon:.4f}°W"
+
+                visible_style = {
+                    'padding': '15px',
+                    'border': '1px solid #bdc3c7',
+                    'borderRadius': '5px',
+                    'backgroundColor': '#ffffff',
+                    'marginTop': '20px',
+                    'maxWidth': '1200px',
+                    'margin': '20px auto',
+                    'display': 'block'
+                }
+
                 return (scatter_multi_style, scatter_single_style,
                         bottom_multi_style, bottom_single_style,
                         empty_fig, empty_fig, scatter_fig,
                         empty_fig, empty_fig, combined_fig,
                         empty_fig, empty_fig, polar_int_fig,
-                        "", "", fname)
+                        "", "", fname,
+                        visible_style, click_info_single, properties_table_single,  # single properties
+                        hidden_style, "", "", "", "")  # multi properties
 
             # ---- MULTI-FILE MODE ----
             if file_path_1 is None and file_path_2 is None:
+                # Hide bottom plots when no files selected
                 return (scatter_multi_style, scatter_single_style,
-                        bottom_multi_style, bottom_single_style,
+                        {'display': 'none'}, {'display': 'none'},  # Hide bottom containers
                         *([click_msg] * n_empty), "", "", "")
 
             fname1 = os.path.basename(file_path_1) if file_path_1 else ""
@@ -7503,12 +7681,15 @@ def run_app(initial_file_path, directory_path):
                 )
 
             if clicked_point_data_1 is None:
+                # Hide bottom plots until point is clicked to prevent layout compression
                 return (scatter_multi_style, scatter_single_style,
-                        bottom_multi_style, bottom_single_style,
+                        {'display': 'none'}, {'display': 'none'},  # Hide bottom containers
                         scatter_fig_1, scatter_fig_2, empty_fig,
                         click_msg, click_msg, click_msg,
                         click_msg, click_msg, click_msg,
-                        fname1, fname2, "")
+                        fname1, fname2, "",
+                        hidden_style, "", "",  # single properties
+                        hidden_style, "", "", "", "")  # multi properties
 
             # Generate angular plots for File 1
             combined_fig_1 = polar_int_1 = click_msg
@@ -7536,12 +7717,57 @@ def run_app(initial_file_path, directory_path):
                 except Exception as e:
                     print(f"Error generating File 2 angular plots: {e}")
 
+            # Generate property tables for both files
+            properties_table_1 = ""
+            properties_table_2 = ""
+            click_info_1 = ""
+            click_info_2 = ""
+
+            if file_path_1 and clicked_point_data_1:
+                properties_table_1 = create_properties_table_compact(
+                    filtered_1, clicked_point_data_1['row'], clicked_point_data_1['col'], 'aod_fine'
+                )
+                original_shape_1 = data_dict_1['original_shape']
+                if len(original_shape_1) == 1:
+                    lat1 = data_dict_1['latitude'][clicked_point_data_1['row']]
+                    lon1 = data_dict_1['longitude'][clicked_point_data_1['row']]
+                else:
+                    lat1 = data_dict_1['latitude'][clicked_point_data_1['row'], clicked_point_data_1['col']]
+                    lon1 = data_dict_1['longitude'][clicked_point_data_1['row'], clicked_point_data_1['col']]
+                click_info_1 = f"Location: {lat1:.4f}°N, {lon1:.4f}°W"
+
+            if file_path_2 and clicked_point_data_2:
+                properties_table_2 = create_properties_table_compact(
+                    filtered_2, clicked_point_data_2['row'], clicked_point_data_2['col'], 'aod_fine'
+                )
+                original_shape_2 = data_dict_2['original_shape']
+                if len(original_shape_2) == 1:
+                    lat2 = data_dict_2['latitude'][clicked_point_data_2['row']]
+                    lon2 = data_dict_2['longitude'][clicked_point_data_2['row']]
+                else:
+                    lat2 = data_dict_2['latitude'][clicked_point_data_2['row'], clicked_point_data_2['col']]
+                    lon2 = data_dict_2['longitude'][clicked_point_data_2['row'], clicked_point_data_2['col']]
+                click_info_2 = f"Location: {lat2:.4f}°N, {lon2:.4f}°W"
+
+            visible_style_multi = {
+                'padding': '15px',
+                'border': '1px solid #bdc3c7',
+                'borderRadius': '5px',
+                'backgroundColor': '#ffffff',
+                'marginTop': '20px',
+                'maxWidth': '1400px',
+                'margin': '20px auto',
+                'display': 'block'
+            }
+
             return (scatter_multi_style, scatter_single_style,
                     bottom_multi_style, bottom_single_style,
                     scatter_fig_1, scatter_fig_2, empty_fig,
                     combined_fig_1, combined_fig_2, empty_fig,
                     polar_int_1, polar_int_2, empty_fig,
-                    fname1, fname2, "")
+                    fname1, fname2, "",
+                    hidden_style, "", "",  # single properties
+                    visible_style_multi, click_info_1, properties_table_1, click_info_2, properties_table_2)  # multi properties
 
         except Exception as e:
             print(f"Error in update_angular_dependence_plots: {e}")
@@ -7550,7 +7776,9 @@ def run_app(initial_file_path, directory_path):
             return (scatter_multi_style, scatter_single_style,
                     bottom_multi_style, bottom_single_style,
                     *([create_placeholder_figure(f"Error: {str(e)}")] * n_empty),
-                    "", "", "")
+                    "", "", "",
+                    hidden_style, "", "",  # single properties
+                    hidden_style, "", "", "", "")  # multi properties
 
     @app.callback(
         [Output('single-file-plots-container', 'style'),
@@ -8775,7 +9003,8 @@ def run_app(initial_file_path, directory_path):
          Output('clicked-point-store', 'data', allow_duplicate=True),
          Output('click-info', 'children'),
          Output('panel-properties-table', 'children'),
-         Output('selected-properties-container', 'style')],
+         Output('selected-properties-container', 'style'),
+         Output('scatter-file-header-single', 'children')],
         [Input('property-selector', 'value'),
          # Input('cost-input', 'value'),
          Input('applied-cost-value', 'data'),
@@ -8784,12 +9013,13 @@ def run_app(initial_file_path, directory_path):
          Input('current-file-data', 'data')],
         [State('latitude-input', 'value'),
          State('longitude-input', 'value'),
-         State('clicked-point-store', 'data')],
+         State('clicked-point-store', 'data'),
+         State('plot-type-selector', 'value')],
         # prevent_initial_call='initial_duplicate'
         prevent_initial_call=True
     )
     def update_all_plots(selected_property, max_cost, clickData, find_button_clicks,
-                         current_file_data, input_lat, input_lon, stored_point_data):
+                         current_file_data, input_lat, input_lon, stored_point_data, plot_type):
         print("Doing callback: update_all_plots")
 
         # Determine which input triggered callback
@@ -8808,14 +9038,14 @@ def run_app(initial_file_path, directory_path):
         if current_file_data is None:
             empty_fig = create_placeholder_figure("No file selected")
             hidden_style = {'display': 'none'}
-            return (empty_fig, empty_fig, None, "No file selected", "", hidden_style)
+            return (empty_fig, empty_fig, None, "No file selected", "", hidden_style, "")
 
         # Get current file path from store and read data
         file_path = current_file_data.get('file_path')
         if file_path is None:
             empty_fig = create_placeholder_figure("Please select a file to view data")
             hidden_style = {'display': 'none'}
-            return (empty_fig, empty_fig, None, "Please select a file", "", hidden_style)
+            return (empty_fig, empty_fig, None, "Please select a file", "", hidden_style, "")
 
         # Read data from cache NOT from current file path
         cached_data = get_cached_data(file_path)
@@ -8913,28 +9143,28 @@ def run_app(initial_file_path, directory_path):
         combined_fig = go.Figure()
 
         # Update figure format pre-click to match with post-click
-        combined_fig.update_layout(
-            height=800,
-            showlegend=True,
-            # minimize overall margins
-            margin=dict(
-                l=50,  # left margin
-                r=40,  # right
-                t=40,  # top (default ~80)
-                b=40  # bottom
-            ),
-            autosize=True
-        )
-        # add pre click annotations
-        combined_fig.add_annotation(
-            text="Click a point on the map to view Intensity and DoLP plots",
-            xref="x", yref="y",
-            x=2.5, y=1.5,
-            showarrow=False,
-            # font=dict(size=18, color="#7f8c8d"),
-            font=dict(size=18, color="black"),
-            xanchor='center', yanchor='middle'
-        )
+        # combined_fig.update_layout(
+        #     height=800,
+        #     showlegend=True,
+        #     # minimize overall margins
+        #     margin=dict(
+        #         l=50,  # left margin
+        #         r=40,  # right
+        #         t=40,  # top (default ~80)
+        #         b=40  # bottom
+        #     ),
+        #     autosize=True
+        # )
+        # # add pre click annotations
+        # combined_fig.add_annotation(
+        #     text="Click a point on the map to view Intensity and DoLP plots",
+        #     xref="x", yref="y",
+        #     x=2.5, y=1.5,
+        #     showarrow=False,
+        #     # font=dict(size=18, color="#7f8c8d"),
+        #     font=dict(size=18, color="black"),
+        #     xanchor='center', yanchor='middle'
+        # )
 
         if clicked_point_data is not None and 'row' in clicked_point_data:
             selected_row = clicked_point_data['row']
@@ -9022,20 +9252,25 @@ def run_app(initial_file_path, directory_path):
             # Use compact version for consistent styling
             properties_table = create_properties_table_compact(filtered_data, selected_row, selected_col, selected_property)
 
-        # Control panel visibility: show only when file is loaded AND point is clicked
-        if clicked_point_data is not None and 'row' in clicked_point_data:
+        # Control panel visibility: show only when on 'scatter' plot type AND point is clicked
+        if plot_type == 'scatter' and clicked_point_data is not None and 'row' in clicked_point_data:
             panel_style = {
                 'padding': '15px',
                 'border': '1px solid #bdc3c7',
                 'borderRadius': '5px',
                 'backgroundColor': '#ffffff',
+                'marginTop': '20px',
+                'marginBottom': '25px',
                 'display': 'block'
             }
         else:
             panel_style = {'display': 'none'}
 
+        # Create file header (file name only, no path)
+        file_header = os.path.basename(file_path) if file_path else ""
+
         return (scatter_fig, combined_fig,
-                clicked_point_data, click_info, properties_table, panel_style)
+                clicked_point_data, click_info, properties_table, panel_style, file_header)
 
     # ---------------------------------------------------
     # EXPORT CALLBACK #1 (16 of 18 total)

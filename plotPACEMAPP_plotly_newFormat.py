@@ -5662,7 +5662,7 @@ def run_app(initial_file_path, directory_path):
                         ),
                     ], id='individual-file-2-container', style={'display': 'none'}),
 
-                    # PLOT TYPE SELECTOR (NEW)
+                    # PLOT TYPE SELECTOR
                     html.Div([
                         html.Label("Select Plot Type:", style={
                             'fontWeight': 'bold',
@@ -5728,26 +5728,47 @@ def run_app(initial_file_path, directory_path):
                         ),
                     ], id='residual-controls-container', style={'display': 'none'}),
 
-                    # Aerosol property selector
+                    # Retrieval property selectors (Scatter + Intensity/DoLP tab only)
                     html.Div([
-                        html.Label("Select Retrieval Property:", style={
-                            'fontWeight': 'bold',
-                            'marginBottom': '5px',
-                            'display': 'block',
-                            'fontSize': '16px'
-                        }),
+                        html.Label("Select Retrieval Property:",
+                                   id='property-selector-label',
+                                   style={
+                                       'fontWeight': 'bold',
+                                       'marginBottom': '10px',
+                                       'display': 'block',
+                                       'fontSize': '16px'
+                                   }),
                         dcc.Dropdown(
                             id='property-selector',
                             options=[],
                             value=None,
                             placeholder="",
                             style={
-                                'marginBottom': '25px',
                                 'height': '24px',
                                 'fontSize': '16px'
                             }
                         ),
-                    ]),
+                    ], id='property-selector-container', style={'display': 'none', 'marginBottom': '50px'}),
+
+                    # File 2 retrieval property selector (Compare Files mode only)
+                    html.Div([
+                        html.Label("File 2 - Retrieval Property:", style={
+                            'fontWeight': 'bold',
+                            'marginBottom': '5px',
+                            'display': 'block',
+                            'fontSize': '16px'
+                        }),
+                        dcc.Dropdown(
+                            id='property-selector-2',
+                            options=[],
+                            value=None,
+                            placeholder="Select file 2 first",
+                            style={
+                                'height': '24px',
+                                'fontSize': '16px'
+                            }
+                        ),
+                    ], id='property-selector-2-container', style={'display': 'none', 'marginTop': '15px', 'marginBottom': '20px'}),
 
                     # Cost selector
                     html.Div([
@@ -6695,20 +6716,37 @@ def run_app(initial_file_path, directory_path):
     # Callback to control plot-specific controls visibility
     @app.callback(
         [Output('polarized-controls-container', 'style'),
-         Output('residual-controls-container', 'style')],
+         Output('residual-controls-container', 'style'),
+         Output('property-selector-container', 'style'),
+         Output('property-selector-2-container', 'style'),
+         Output('property-selector-label', 'children')],
         [Input('plot-type-selector', 'value'),
          Input('individual-analysis-mode', 'value')]
     )
     def update_plot_specific_controls(plot_type, analysis_mode):
         print(f"Updating plot-specific controls for: {plot_type}, mode: {analysis_mode}")
 
+        is_scatter = (plot_type == 'scatter')
+        is_multi   = (analysis_mode == 'multiple')
+
         # Polarized controls: show only for polarized plot AND when in compare mode
-        polarized_style = {'display': 'block'} if (plot_type == 'polarized' and analysis_mode == 'multiple') else {'display': 'none'}
+        polarized_style = {'display': 'block'} if (plot_type == 'polarized' and is_multi) else {'display': 'none'}
 
         # Residual controls: show only for residual plot
         residual_style = {'display': 'block'} if plot_type == 'residual' else {'display': 'none'}
 
-        return polarized_style, residual_style
+        # Property selector: visible on Scatter tab only
+        # marginBottom controls space between this and the next element (File 2 selector or Cost Filter)
+        prop_style = {'display': 'block', 'marginBottom': '20px'} if is_scatter else {'display': 'none'}
+
+        # File 2 property selector: visible on Scatter tab in Compare Files mode only
+        # marginTop controls space above (gap between the two dropdowns); marginBottom controls space before Cost Filter
+        prop2_style = {'display': 'block', 'marginTop': '15px', 'marginBottom': '20px'} if (is_scatter and is_multi) else {'display': 'none'}
+
+        # Label: distinguish single vs. compare files
+        prop_label = "File 1 - Retrieval Property:" if (is_scatter and is_multi) else "Select Retrieval Property:"
+
+        return polarized_style, residual_style, prop_style, prop2_style, prop_label
 
     # ---------------------------------------------------
     # ORIGINAL CALLBACKS START HERE
@@ -6740,6 +6778,7 @@ def run_app(initial_file_path, directory_path):
          Input('file-selector', 'value'),
          Input('individual-file-selector-2', 'value'),
          Input('property-selector', 'value'),
+         Input('property-selector-2', 'value'),
          Input('applied-cost-value', 'data'),
          # Input('multi-file-clicked-point', 'data')],
          Input('scatter-plot-1', 'clickData'),
@@ -6748,8 +6787,8 @@ def run_app(initial_file_path, directory_path):
          State('longitude-input', 'value')],
         prevent_initial_call=True
     )
-    def update_scatter_multi(analysis_mode, file_path_1, file_path_2, selected_property, max_cost,
-                             clickData, find_button_clicks, input_lat, input_lon):
+    def update_scatter_multi(analysis_mode, file_path_1, file_path_2, selected_property, selected_property_2,
+                             max_cost, clickData, find_button_clicks, input_lat, input_lon):
         from dash import callback_context
         print("Doing callback: update_scatter_multi")
 
@@ -6807,11 +6846,11 @@ def run_app(initial_file_path, directory_path):
             default_info = html.P("Select both files to enable comparison")
             return [placeholder_fig] * NUM_FIGURES + default_headers + [default_info]
 
-        # When selected_property is NONE (i.e., user not selected yet)
-        if selected_property is None:
-            placeholder_fig = create_placeholder_figure("Please select a property to display")
-            default_headers = default_headers
-            default_info = html.P("Select a property to display")
+        # When either property is NONE (i.e., user not selected yet)
+        if selected_property is None or selected_property_2 is None:
+            msg = "Please select a File 1 property to display" if selected_property is None else "Please select a File 2 property to display"
+            placeholder_fig = create_placeholder_figure(msg)
+            default_info = html.P(msg)
             return [placeholder_fig] * NUM_FIGURES + default_headers + [default_info]
 
         # HERE IS WHERE THE MAIN FUNCTION BEGINS
@@ -6887,7 +6926,7 @@ def run_app(initial_file_path, directory_path):
                     # Find file 2 closest point
                     lat_2d = filtered_data_2['latitude']
                     lon_2d = filtered_data_2['longitude']
-                    prop_2d = filtered_data_2[selected_property] if selected_property in filtered_data_2 else None
+                    prop_2d = filtered_data_2[selected_property_2] if selected_property_2 in filtered_data_2 else None
 
                     # Make sure we have valid lat/lon (should always happen)
                     valid_mask = np.isfinite(lat_2d) & np.isfinite(lon_2d)
@@ -6954,7 +6993,7 @@ def run_app(initial_file_path, directory_path):
 
                         # Create property tables
                         properties_table_1 = create_properties_table_compact(filtered_data_1, file1_row, file1_col, selected_property)
-                        properties_table_2 = create_properties_table_compact(filtered_data_2, file2_row, file2_col, selected_property)
+                        properties_table_2 = create_properties_table_compact(filtered_data_2, file2_row, file2_col, selected_property_2)
 
                         # Build comparison info panel (3-column layout as before)
                         comparison_info = html.Div([
@@ -7091,7 +7130,7 @@ def run_app(initial_file_path, directory_path):
                     # Find nearest point in File 2
                     lat_2d = filtered_data_2['latitude']
                     lon_2d = filtered_data_2['longitude']
-                    prop_2d = filtered_data_2[selected_property] if selected_property in filtered_data_2 else None
+                    prop_2d = filtered_data_2[selected_property_2] if selected_property_2 in filtered_data_2 else None
                     valid_mask = np.isfinite(lat_2d) & np.isfinite(lon_2d)
                     if prop_2d is not None:
                         valid_mask = valid_mask & np.isfinite(prop_2d)
@@ -7129,7 +7168,7 @@ def run_app(initial_file_path, directory_path):
                         filename1 = os.path.basename(file_path_1)
                         filename2 = os.path.basename(file_path_2)
                         properties_table_1 = create_properties_table_compact(filtered_data_1, file1_row, file1_col, selected_property)
-                        properties_table_2 = create_properties_table_compact(filtered_data_2, file2_row, file2_col, selected_property)
+                        properties_table_2 = create_properties_table_compact(filtered_data_2, file2_row, file2_col, selected_property_2)
                         comparison_info = html.Div([
                             html.Div([
                                 html.Div([
@@ -7179,7 +7218,7 @@ def run_app(initial_file_path, directory_path):
 
             # Create scatter plots (using clicked_data or None)
             scatter_fig_1 = create_scatter_plot_only(filtered_data_1, selected_property, original_indices_1, clicked_data_1, max_cost)
-            scatter_fig_2 = create_scatter_plot_only(filtered_data_2, selected_property, original_indices_2, clicked_data_2, max_cost)
+            scatter_fig_2 = create_scatter_plot_only(filtered_data_2, selected_property_2, original_indices_2, clicked_data_2, max_cost)
 
             # Create intensity/dolp/polarized plots
             if file1_row is not None and file2_row is not None:
@@ -9124,6 +9163,35 @@ def run_app(initial_file_path, directory_path):
             print(f"Error loading file {selected_file_path}: {str(e)}")
             # If error, return current values
             raise dash.exceptions.PreventUpdate
+
+    # ---------------------------------------------------
+    # FILE 2 PROPERTY SELECTOR CALLBACK
+    # ---------------------------------------------------
+    @app.callback(
+        [Output('property-selector-2', 'options'),
+         Output('property-selector-2', 'value')],
+        Input('individual-file-selector-2', 'value'),
+        prevent_initial_call=True
+    )
+    def load_file2_property_options(file_path_2):
+        print("Doing callback: load_file2_property_options")
+        if file_path_2 is None:
+            return [], None
+        try:
+            data_dict, sorted_variables, display_names, variable_metadata = load_retrieval_file(file_path_2)
+            options = create_dropdown_options(sorted_variables, display_names, variable_metadata)
+            # Pick same default variable preference as File 1
+            default_var = None
+            for var in sorted_variables:
+                if 'optical_depth' in var and ('556' in var or '_556' in var) and 'fine' in var:
+                    default_var = var
+                    break
+            if default_var is None and sorted_variables:
+                default_var = sorted_variables[0]
+            return options, default_var
+        except Exception as e:
+            print(f"Error loading File 2 properties from {file_path_2}: {e}")
+            return [], None
 
     # ---------------------------------------------------
     # COST INCREMENT/DECREMENT CALLBACK

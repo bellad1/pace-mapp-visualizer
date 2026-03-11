@@ -5682,8 +5682,8 @@ def run_app(initial_file_path, directory_path):
                             ],
                             value='about',  # Default to About on startup
                             style={
-                                'marginBottom': '15px',
-                                'fontSize': '12px'
+                                'marginBottom': '20px',
+                                'fontSize': '16px'
                             }
                         ),
                     ]),
@@ -5777,6 +5777,7 @@ def run_app(initial_file_path, directory_path):
                                    style={
                                       'fontWeight': 'bold',
                                       'marginBottom': '5px',
+                                      'marginTop': '10px',
                                       'display': 'block',
                                       'fontSize': '16px'
                                     }),
@@ -6727,7 +6728,7 @@ def run_app(initial_file_path, directory_path):
         print(f"Updating plot-specific controls for: {plot_type}, mode: {analysis_mode}")
 
         is_scatter = (plot_type == 'scatter')
-        is_multi   = (analysis_mode == 'multiple')
+        is_multi = (analysis_mode == 'multiple')
 
         # Polarized controls: show only for polarized plot AND when in compare mode
         polarized_style = {'display': 'block'} if (plot_type == 'polarized' and is_multi) else {'display': 'none'}

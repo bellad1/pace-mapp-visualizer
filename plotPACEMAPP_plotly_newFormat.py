@@ -5996,7 +5996,7 @@ def run_app(initial_file_path, directory_path):
                             # html.H4("", id='scatter-file-header-single', style={'textAlign': 'center'}),
                             html.H4("", id='scatter-file-header-single', style={'textAlign': 'center', 'margin': '0 0 10px 0'}),
                             dcc.Graph(
-                                id='aerosol-plot',
+                                id='scatter-plot-single',
                                 figure=create_placeholder_figure("Please select a file to view the scatter plot"),
                                 style={'height': '500px'}
                             ),
@@ -6740,10 +6740,14 @@ def run_app(initial_file_path, directory_path):
          Input('property-selector', 'value'),
          Input('applied-cost-value', 'data'),
          # Input('multi-file-clicked-point', 'data')],
-         Input('scatter-plot-1', 'clickData')],
+         Input('scatter-plot-1', 'clickData'),
+         Input('find-point-button', 'n_clicks')],
+        [State('latitude-input', 'value'),
+         State('longitude-input', 'value')],
         prevent_initial_call=True
     )
-    def update_scatter_multi(analysis_mode, file_path_1, file_path_2, selected_property, max_cost, clickData):
+    def update_scatter_multi(analysis_mode, file_path_1, file_path_2, selected_property, max_cost,
+                             clickData, find_button_clicks, input_lat, input_lon):
         from dash import callback_context
         print("Doing callback: update_scatter_multi")
 
@@ -6762,6 +6766,7 @@ def run_app(initial_file_path, directory_path):
         # Check what triggered this callback
         ctx = callback_context
         files_changed = False
+        trigger_id = None
 
         if ctx.triggered:
             trigger_id = ctx.triggered[0]['prop_id']
@@ -6770,9 +6775,18 @@ def run_app(initial_file_path, directory_path):
                 'individual-analysis-mode.value' in trigger_id):
                 files_changed = True
 
-        # use click data only if files have NOT changed
+        find_by_coords = (
+            trigger_id is not None and
+            'find-point-button' in trigger_id and
+            find_button_clicks and
+            input_lat is not None and
+            input_lon is not None
+        )
+
+        # use click data only if files have NOT changed and button wasn't used
+        # (find_by_coords takes priority over any stored clickData)
         # and use effective_clickData instead of clickData below
-        effective_clickData = None if files_changed else clickData
+        effective_clickData = None if (files_changed or find_by_coords) else clickData
 
         # Early returns for invalid states
         # When NOT in multi-file mode
@@ -7042,6 +7056,122 @@ def run_app(initial_file_path, directory_path):
 
                 except Exception as e:
                     print(f"ERROR processing click: {e}")
+                    import traceback
+                    traceback.print_exc()
+
+            elif find_by_coords:
+                try:
+                    click_lat = float(input_lat)
+                    click_lon = float(input_lon)
+
+                    # Find nearest point in File 1
+                    lats_flat_1 = filtered_data_1['latitude'].flatten()
+                    lons_flat_1 = filtered_data_1['longitude'].flatten()
+                    prop_flat_1 = filtered_data_1[selected_property].flatten() if selected_property in filtered_data_1 else lats_flat_1
+                    valid_mask_1 = np.isfinite(lats_flat_1) & np.isfinite(lons_flat_1) & np.isfinite(prop_flat_1)
+                    if valid_mask_1.any():
+                        valid_lats_1 = lats_flat_1[valid_mask_1]
+                        valid_lons_1 = lons_flat_1[valid_mask_1]
+                        valid_indices_1 = np.arange(len(lats_flat_1))[valid_mask_1]
+                        distances_1 = np.sqrt((valid_lats_1 - click_lat)**2 + (valid_lons_1 - click_lon)**2)
+                        nearest_flat_idx_1 = int(valid_indices_1[int(np.argmin(distances_1))])
+                        original_shape_1 = data_dict_1['original_shape']
+                        if len(original_shape_1) == 1:
+                            file1_row = nearest_flat_idx_1
+                            file1_col = 0
+                        else:
+                            file1_row = nearest_flat_idx_1 // original_shape_1[1]
+                            file1_col = nearest_flat_idx_1 % original_shape_1[1]
+                        # Use the actual matched point's coordinates for File 2 search
+                        click_lat = float(lats_flat_1[nearest_flat_idx_1])
+                        click_lon = float(lons_flat_1[nearest_flat_idx_1])
+
+                    # Find nearest point in File 2
+                    lat_2d = filtered_data_2['latitude']
+                    lon_2d = filtered_data_2['longitude']
+                    prop_2d = filtered_data_2[selected_property] if selected_property in filtered_data_2 else None
+                    valid_mask = np.isfinite(lat_2d) & np.isfinite(lon_2d)
+                    if prop_2d is not None:
+                        valid_mask = valid_mask & np.isfinite(prop_2d)
+                    if np.any(valid_mask):
+                        original_shape_2 = data_dict_2['original_shape']
+                        if len(original_shape_2) == 1:
+                            valid_rows, = np.where(valid_mask)
+                            valid_cols = np.zeros_like(valid_rows)
+                        else:
+                            valid_rows, valid_cols = np.where(valid_mask)
+                        valid_lats = lat_2d[valid_mask]
+                        valid_lons = lon_2d[valid_mask]
+                        file2_closest_idx = find_nearest_point(valid_lats, valid_lons, click_lat, click_lon)
+                        file2_row = valid_rows[file2_closest_idx]
+                        file2_col = valid_cols[file2_closest_idx]
+                        if len(original_shape_2) == 1:
+                            file2_actual_lat = lat_2d[file2_row]
+                            file2_actual_lon = lon_2d[file2_row]
+                            file2_value = prop_2d[file2_row] if prop_2d is not None else 0
+                        else:
+                            file2_actual_lat = lat_2d[file2_row, file2_col]
+                            file2_actual_lon = lon_2d[file2_row, file2_col]
+                            file2_value = prop_2d[file2_row, file2_col] if prop_2d is not None else 0
+
+                        clicked_data_1 = {'lat': click_lat, 'lon': click_lon, 'value': 0}
+                        clicked_data_2 = {
+                            'lat': float(file2_actual_lat),
+                            'lon': float(file2_actual_lon),
+                            'value': float(file2_value)
+                        }
+
+                        distance_deg = np.sqrt((click_lat - file2_actual_lat)**2 + (click_lon - file2_actual_lon)**2)
+                        distance_km = distance_deg * 111
+                        warning = get_distance_warning(distance_km)
+                        filename1 = os.path.basename(file_path_1)
+                        filename2 = os.path.basename(file_path_2)
+                        properties_table_1 = create_properties_table_compact(filtered_data_1, file1_row, file1_col, selected_property)
+                        properties_table_2 = create_properties_table_compact(filtered_data_2, file2_row, file2_col, selected_property)
+                        comparison_info = html.Div([
+                            html.Div([
+                                html.Div([
+                                    html.H6("Selected Point Properties (file 1)", style={
+                                        'textAlign': 'center', 'marginTop': '5px', 'marginBottom': '5px',
+                                        'color': '#2c3e50', 'fontSize': '16px', 'fontWeight': 'bold'
+                                    }),
+                                    html.P(f"Location: ({click_lat:.4f}°, {click_lon:.4f}°)",
+                                           style={'fontSize': '12px', 'color': '#666',
+                                                  'marginBottom': '10px', 'marginTop': '5px'}),
+                                    properties_table_1
+                                ], style={'flex': '1', 'padding': '5px', 'minWidth': '0'}),
+                                html.Div([
+                                    html.H6("Spatiotemporal Comparison", style={
+                                        'textAlign': 'center', 'marginBottom': '15px',
+                                        'color': '#2c3e50', 'fontSize': '16px', 'fontWeight': 'bold'
+                                    }),
+                                    html.Div([
+                                        html.Strong("Distance: "),
+                                        html.Div(f"{distance_km:.1f} km", style={'fontSize': '16px', 'fontWeight': 'bold'})
+                                    ], style={'marginBottom': '15px', 'textAlign': 'center'}),
+                                    html.Div([
+                                        html.Span(f"{warning['icon']} {warning['text']}", style={
+                                            'color': warning['color'], 'fontWeight': 'bold', 'fontSize': '13px',
+                                            'padding': '8px 12px', 'backgroundColor': 'white',
+                                            'border': f"2px solid {warning['color']}", 'borderRadius': '6px',
+                                            'display': 'block', 'textAlign': 'center'
+                                        })
+                                    ], style={'marginBottom': '15px'}),
+                                ], style={'flex': '0.6', 'padding': '5px', 'minWidth': '0'}),
+                                html.Div([
+                                    html.H6("Selected Point Properties (file 2)", style={
+                                        'textAlign': 'center', 'marginTop': '5px', 'marginBottom': '5px',
+                                        'color': '#2c3e50', 'fontSize': '16px', 'fontWeight': 'bold'
+                                    }),
+                                    html.P(f"Location: ({float(file2_actual_lat):.4f}°, {float(file2_actual_lon):.4f}°)",
+                                           style={'fontSize': '11px', 'color': '#666',
+                                                  'marginBottom': '10px', 'marginTop': '5px'}),
+                                    properties_table_2
+                                ], style={'flex': '1', 'padding': '5px', 'minWidth': '0'})
+                            ], style={'display': 'flex', 'flexDirection': 'row', 'gap': '0px'})
+                        ])
+                except Exception as e:
+                    print(f"ERROR processing find-by-coords in multi-file: {e}")
                     import traceback
                     traceback.print_exc()
 
@@ -7552,12 +7682,16 @@ def run_app(initial_file_path, directory_path):
          Input('plot-type-selector', 'value'),
          Input('angular-x-axis-selector', 'value'),
          Input('angular-scatter-plot-1', 'clickData'),
-         Input('angular-scatter-plot-single', 'clickData')],
+         Input('angular-scatter-plot-single', 'clickData'),
+         Input('find-point-button', 'n_clicks')],
+        [State('latitude-input', 'value'),
+         State('longitude-input', 'value')],
         prevent_initial_call=True
     )
     def update_solar_geometry(analysis_mode, file_path_1, file_path_2,
-                                        max_cost, plot_type, x_axis_type,
-                                        click_multi, click_single):
+                              max_cost, plot_type, x_axis_type,
+                              click_multi, click_single, find_button_clicks,
+                              input_lat, input_lon):
         """
         Solar and Instrument Geometry: scatter maps colored by selected angular
         quantity; Intensity, DoLP, and polar plots for the clicked point.
@@ -7585,15 +7719,23 @@ def run_app(initial_file_path, directory_path):
 
         # Reset click on file / mode change
         ctx = callback_context
+        triggered_ids = [t['prop_id'] for t in ctx.triggered]
         files_changed = any(
-            'file-selector' in t['prop_id'] or
-            'individual-file-selector-2' in t['prop_id'] or
-            'individual-analysis-mode' in t['prop_id']
-            for t in ctx.triggered
+            'file-selector' in t or
+            'individual-file-selector-2' in t or
+            'individual-analysis-mode' in t
+            for t in triggered_ids
         )
         if files_changed:
             click_multi = None
             click_single = None
+
+        find_by_coords = (
+            any('find-point-button' in t for t in triggered_ids) and
+            find_button_clicks and
+            input_lat is not None and
+            input_lon is not None
+        )
 
         is_multi = (analysis_mode == 'multiple')
         scatter_multi_style = {'display': 'block', 'marginBottom': '25px'} if is_multi else {'display': 'none'}
@@ -7622,17 +7764,32 @@ def run_app(initial_file_path, directory_path):
                 color_values, color_label = compute_scattering_angle_values(filtered_data, x_axis_type)
                 fname = os.path.basename(file_path_1)
 
-                # Determine clicked point using pointNumber (same approach as main scatter callback)
+                # Determine clicked point: map click (pointNumber) or Enter Coordinates
                 clicked_point_data = None
-                if click_single is not None and 'points' in click_single and click_single['points']:
+                lats_flat = filtered_data['latitude'].flatten()
+                lons_flat = filtered_data['longitude'].flatten()
+                valid_mask = np.isfinite(lats_flat) & np.isfinite(lons_flat) & np.isfinite(color_values)
+
+                if find_by_coords:
+                    valid_flat_indices = np.arange(len(lats_flat))[valid_mask]
+                    if valid_flat_indices.size > 0:
+                        valid_lats = lats_flat[valid_mask]
+                        valid_lons = lons_flat[valid_mask]
+                        distances = np.sqrt((valid_lats - float(input_lat))**2 + (valid_lons - float(input_lon))**2)
+                        nearest = int(valid_flat_indices[int(np.argmin(distances))])
+                        original_shape = data_dict['original_shape']
+                        if len(original_shape) == 1:
+                            sel_row, sel_col = nearest, 0
+                        else:
+                            sel_row = nearest // original_shape[1]
+                            sel_col = nearest % original_shape[1]
+                        clicked_point_data = {'row': sel_row, 'col': sel_col}
+                elif click_single is not None and 'points' in click_single and click_single['points']:
                     pt = click_single['points'][0]
                     point_number = pt.get('pointNumber', None)
                     curve_number = pt.get('curveNumber', 0)
                     # Only process clicks on the main data trace (curveNumber 0), not the red highlight
                     if point_number is not None and curve_number == 0:
-                        lats_flat = filtered_data['latitude'].flatten()
-                        lons_flat = filtered_data['longitude'].flatten()
-                        valid_mask = np.isfinite(lats_flat) & np.isfinite(lons_flat) & np.isfinite(color_values)
                         valid_flat_indices = np.arange(len(lats_flat))[valid_mask]
                         if point_number < len(valid_flat_indices):
                             original_idx = int(valid_flat_indices[point_number])
@@ -7731,15 +7888,32 @@ def run_app(initial_file_path, directory_path):
                 filtered_1, _ = filter_by_cost(data_dict_1, max_cost)
                 color_values_1, color_label_1 = compute_scattering_angle_values(filtered_1, x_axis_type)
 
-                # Determine clicked point from File 1 using pointNumber
-                if click_multi is not None and 'points' in click_multi and click_multi['points']:
+                # Determine clicked point from File 1: map click or Enter Coordinates
+                lats_flat_1 = filtered_1['latitude'].flatten()
+                lons_flat_1 = filtered_1['longitude'].flatten()
+                valid_mask_1 = np.isfinite(lats_flat_1) & np.isfinite(lons_flat_1) & np.isfinite(color_values_1)
+
+                if find_by_coords:
+                    valid_flat_indices_1 = np.arange(len(lats_flat_1))[valid_mask_1]
+                    if valid_flat_indices_1.size > 0:
+                        valid_lats_1 = lats_flat_1[valid_mask_1]
+                        valid_lons_1 = lons_flat_1[valid_mask_1]
+                        distances_1 = np.sqrt((valid_lats_1 - float(input_lat))**2 + (valid_lons_1 - float(input_lon))**2)
+                        nearest_1 = int(valid_flat_indices_1[int(np.argmin(distances_1))])
+                        original_shape_1 = data_dict_1['original_shape']
+                        if len(original_shape_1) == 1:
+                            sel_row_1, sel_col_1 = nearest_1, 0
+                        else:
+                            sel_row_1 = nearest_1 // original_shape_1[1]
+                            sel_col_1 = nearest_1 % original_shape_1[1]
+                        clicked_point_data_1 = {'row': sel_row_1, 'col': sel_col_1}
+                        clicked_lat = float(lats_flat_1[nearest_1])
+                        clicked_lon = float(lons_flat_1[nearest_1])
+                elif click_multi is not None and 'points' in click_multi and click_multi['points']:
                     pt = click_multi['points'][0]
                     point_number = pt.get('pointNumber', None)
                     curve_number = pt.get('curveNumber', 0)
                     if point_number is not None and curve_number == 0:
-                        lats_flat_1 = filtered_1['latitude'].flatten()
-                        lons_flat_1 = filtered_1['longitude'].flatten()
-                        valid_mask_1 = np.isfinite(lats_flat_1) & np.isfinite(lons_flat_1) & np.isfinite(color_values_1)
                         valid_flat_indices_1 = np.arange(len(lats_flat_1))[valid_mask_1]
                         if point_number < len(valid_flat_indices_1):
                             original_idx_1 = int(valid_flat_indices_1[point_number])
@@ -9054,49 +9228,74 @@ def run_app(initial_file_path, directory_path):
     # ---------------------------------------------------
     # LAT-LON INPUT CALLBACK (14 of 18 total)
     # ---------------------------------------------------
+    # Scatter plot IDs that should populate the lat/lon boxes when clicked.
+    # Only left/single figures are included — clicking File 2 does not drive selection.
+    _CLICK_SCATTER_IDS = {
+        'scatter-plot-single',           # Scatter tab, single file
+        'scatter-plot-1',         # Scatter tab, Compare Files (left)
+        'angular-scatter-plot-single',  # Solar/Geometry, single file
+        'angular-scatter-plot-1', # Solar/Geometry, Compare Files (left)
+    }
+
     @app.callback(
             [Output('latitude-input', 'value'),
              Output('longitude-input', 'value')],
-            [Input('aerosol-plot', 'clickData')],
-            [State('clicked-point-store', 'data'),
-             State('current-file-data', 'data')],
+            [Input('scatter-plot-single', 'clickData'),
+             Input('scatter-plot-1', 'clickData'),
+             Input('angular-scatter-plot-single', 'clickData'),
+             Input('angular-scatter-plot-1', 'clickData'),
+             Input('clicked-point-store', 'data')],
+            [State('current-file-data', 'data')],
             prevent_initial_call=True
             )
-    def update_latlon_inputs(clickData, stored_point_data, current_file_data):
+    def update_latlon_inputs(click_scatter_single, click_scatter1, click_angular_single,
+                             click_angular_multi, stored_point_data, current_file_data):
         print("Doing callback: update_latlon_inputs")
-        # if point is clicked on map, update the text boxes
-        if clickData is not None:
-            try:
-                point_data = clickData['points'][0]
-                if 'lat' in point_data:  # For scattergeo
-                    return point_data['lat'], point_data['lon']
-                else:  # for scatter
-                    return point_data['y'], point_data['x']
-            except Exception as e:
-                print(f"Error updating lat/lon inputs: {e}")
 
-        # if no new click, maintain previous values
+        ctx = callback_context
+        trigger_id = ctx.triggered[0]['prop_id'] if ctx.triggered else None
+
+        # Map click on any of the primary scatter plots: extract lat/lon directly
+        click_map = {
+            'scatter-plot-single':         click_scatter_single,
+            'scatter-plot-1':              click_scatter1,
+            'angular-scatter-plot-single': click_angular_single,
+            'angular-scatter-plot-1':      click_angular_multi,
+        }
+        if trigger_id:
+            for plot_id, click_data in click_map.items():
+                if plot_id in trigger_id and click_data is not None:
+                    try:
+                        point_data = click_data['points'][0]
+                        if 'lat' in point_data:  # scattergeo / scatter_mapbox
+                            return point_data['lat'], point_data['lon']
+                        else:  # plain scatter
+                            return point_data['y'], point_data['x']
+                    except Exception as e:
+                        print(f"Error updating lat/lon inputs from {plot_id} click: {e}")
+
+        # Store updated (find-button or any other source): look up actual lat/lon
+        # from the data using stored row/col so boxes always show the real point
         if stored_point_data is not None and current_file_data is not None:
-            idx = stored_point_data.get('original_idx')
+            row = stored_point_data.get('row')
+            col = stored_point_data.get('col')
             file_path = current_file_data.get('file_path')
 
-            if idx is not None and file_path is not None:
+            if row is not None and file_path is not None:
                 try:
-                    # Read data for current file
-                    data_dict, _, _, _ = load_retrieval_file(file_path)
-
-                    # Filter by current cost value
-                    max_cost = current_file_data.get('max_cost_value')
-                    filtered_data, original_indices = filter_by_cost(data_dict, max_cost)
-
-                    # Check if index exists in original_indices
-                    if idx in original_indices:
-                        local_idx = np.where(original_indices == idx)[0][0]
-                        return filtered_data['latitude'][local_idx], filtered_data['longitude'][local_idx]
+                    cached = get_cached_data(file_path)
+                    data_dict = cached['data_dict']
+                    original_shape = data_dict['original_shape']
+                    if len(original_shape) == 1:
+                        lat = float(data_dict['latitude'][row])
+                        lon = float(data_dict['longitude'][row])
+                    else:
+                        lat = float(data_dict['latitude'][row, col])
+                        lon = float(data_dict['longitude'][row, col])
+                    return lat, lon
                 except Exception as e:
                     print(f"Error retrieving coordinates for stored point: {e}")
 
-        # Default - no values
         return None, None
 
     # ---------------------------------------------------
@@ -9104,7 +9303,7 @@ def run_app(initial_file_path, directory_path):
     #   -Core functionality
     # ---------------------------------------------------
     @app.callback(
-        [Output('aerosol-plot', 'figure'),
+        [Output('scatter-plot-single', 'figure'),
          Output('combined-plot', 'figure'),
          Output('scatter-polarized-plot-single', 'figure'),
          Output('combined-plot-container', 'style'),
@@ -9117,7 +9316,7 @@ def run_app(initial_file_path, directory_path):
         [Input('property-selector', 'value'),
          # Input('cost-input', 'value'),
          Input('applied-cost-value', 'data'),
-         Input('aerosol-plot', 'clickData'),
+         Input('scatter-plot-single', 'clickData'),
          Input('find-point-button', 'n_clicks'),
          Input('current-file-data', 'data')],
         [State('latitude-input', 'value'),
@@ -9207,7 +9406,7 @@ def run_app(initial_file_path, directory_path):
                 clicked_point_data = stored_point_data
 
         # If user clicks directly on map
-        elif trigger_id == 'aerosol-plot' and clickData is not None:
+        elif trigger_id == 'scatter-plot-single' and clickData is not None:
             try:
                 # Map click logic (same as before)
                 point_data = clickData['points'][0]

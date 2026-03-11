@@ -2371,9 +2371,58 @@ def generate_wavelength_colors(wavelengths):
 # =============================================================================
 # PLOTTING AND VISUALIZATION FUNCTIONS
 # =============================================================================
-def create_intensity_plot_only(intensity_data, wavelengths, wl_colors, title):
+
+def compute_shared_yrange(data_1, data_2, keys):
     """
-    Create intensity-only plot
+    Compute a shared [ymin, ymax] y-axis range across two wavelength-keyed data
+    dicts (e.g. intensity_data or dolp_data) for the given value keys
+    (e.g. ['y_meas', 'y_model']).  Returns None if no finite values are found,
+    which leaves Plotly free to auto-scale.  A 5% padding is added on each side.
+    """
+    all_vals = []
+    for data in [data_1, data_2]:
+        for wl_data in data.values():
+            for key in keys:
+                all_vals.extend([v for v in wl_data.get(key, []) if np.isfinite(v)])
+    if not all_vals:
+        return None
+    lo, hi = min(all_vals), max(all_vals)
+    pad = (hi - lo) * 0.05 if hi != lo else abs(hi) * 0.05 or 0.05
+    return [lo - pad, hi + pad]
+
+
+def compute_shared_yrange_polarized(intensity_data_1, dolp_data_1,
+                                    intensity_data_2, dolp_data_2, wavelengths):
+    """
+    Compute a shared [ymin, ymax] range for polarized reflectance (DoLP *
+    Intensity) across two files.  Handles both measured and modeled values.
+    Returns None if no finite values are found.
+    """
+    all_vals = []
+    for intensity_data, dolp_data in [(intensity_data_1, dolp_data_1),
+                                      (intensity_data_2, dolp_data_2)]:
+        for wl in wavelengths:
+            if wl not in intensity_data or wl not in dolp_data:
+                continue
+            for i_key, d_key in [('y_meas', 'y_meas'), ('y_model', 'y_model')]:
+                i_vals = np.array(intensity_data[wl].get(i_key, []))
+                d_vals = np.array(dolp_data[wl].get(d_key, []))
+                min_len = min(len(i_vals), len(d_vals))
+                if min_len == 0:
+                    continue
+                pr = i_vals[:min_len] * d_vals[:min_len]
+                all_vals.extend([v for v in pr if np.isfinite(v)])
+    if not all_vals:
+        return None
+    lo, hi = min(all_vals), max(all_vals)
+    pad = (hi - lo) * 0.05 if hi != lo else abs(hi) * 0.05 or 0.05
+    return [lo - pad, hi + pad]
+
+
+def create_intensity_plot_only(intensity_data, wavelengths, wl_colors, title, yaxis_range=None):
+    """
+    Create intensity-only plot.  Pass yaxis_range=[ymin, ymax] to fix the
+    y-axis (e.g. for syncing two side-by-side plots in Compare Files mode).
     """
     fig = go.Figure()
 
@@ -2413,6 +2462,7 @@ def create_intensity_plot_only(intensity_data, wavelengths, wl_colors, title):
         ),
         xaxis_title="Viewing Zenith Angle (degrees)",
         yaxis_title="Intensity",
+        yaxis=dict(range=yaxis_range) if yaxis_range is not None else {},
         height=800,
         legend=dict(
             orientation="h",
@@ -2441,9 +2491,10 @@ def create_intensity_plot_only(intensity_data, wavelengths, wl_colors, title):
     return fig
 
 
-def create_dolp_plot_only(dolp_data, wavelengths, wl_colors, title):
+def create_dolp_plot_only(dolp_data, wavelengths, wl_colors, title, yaxis_range=None):
     """
-    Create DoLP-only plot
+    Create DoLP-only plot.  Pass yaxis_range=[ymin, ymax] to fix the
+    y-axis (e.g. for syncing two side-by-side plots in Compare Files mode).
     """
     fig = go.Figure()
 
@@ -2483,6 +2534,7 @@ def create_dolp_plot_only(dolp_data, wavelengths, wl_colors, title):
         ),
         xaxis_title="Viewing Zenith Angle (degrees)",
         yaxis_title="DoLP",
+        yaxis=dict(range=yaxis_range) if yaxis_range is not None else {},
         height=800,
         legend=dict(
             orientation="h",
@@ -3035,7 +3087,7 @@ def create_scatter_plot_only(data_dict, selected_property, original_indices, cli
         map=dict(
             style="carto-positron",
             center=dict(lat=center_lat, lon=center_lon),
-            zoom=4.75
+            zoom=5.25
             # zoom=4.0
         ),
         margin=dict(
@@ -3164,6 +3216,7 @@ def create_image_swath_scatter(pace_data_dict, rsp_data_dict, matching_results, 
         map=dict(
             style="carto-positron",
             center=dict(lat=center_lat, lon=center_lon),
+            # zoom=4.0
             zoom=4.0
         ),
         margin=dict(l=0, r=0, t=30, b=0),
@@ -3308,7 +3361,7 @@ def create_angular_scatter_plot(filtered_data, color_values, color_label, clicke
         lon=plot_lons,
         mode='markers',
         marker=dict(
-            size=6,
+            size=4,
             color=plot_vals,
             colorscale='Viridis',
             cmin=vmin,
@@ -3363,7 +3416,8 @@ def create_angular_scatter_plot(filtered_data, color_values, color_label, clicke
         map=dict(
             style='carto-positron',
             center=dict(lat=center_lat, lon=center_lon),
-            zoom=4.0
+            # zoom=5.0
+            zoom=5.25
         ),
         margin=dict(l=0, r=0, t=30, b=0),
         autosize=True
@@ -4628,10 +4682,11 @@ def create_aod_histogram(data_dict, selected_property, max_cost, bin_size=0.1):
     return fig
 
 
-def create_polarized_reflectance_plot(intensity_data, dolp_data, wavelengths, wl_colors):
+def create_polarized_reflectance_plot(intensity_data, dolp_data, wavelengths, wl_colors, yaxis_range=None):
     """
-    Create a plot showing polarized reflectance (DoLP — Intensity) vs VZA
-    with both measured and modeled data
+    Create a plot showing polarized reflectance (DoLP * Intensity) vs VZA
+    with both measured and modeled data.  Pass yaxis_range=[ymin, ymax] to fix
+    the y-axis (e.g. for syncing two side-by-side plots in Compare Files mode).
     """
     # Create single plot
     fig = go.Figure()
@@ -4662,7 +4717,7 @@ def create_polarized_reflectance_plot(intensity_data, dolp_data, wavelengths, wl
                 x=x_meas,
                 y=polarized_refl_meas,
                 mode='markers+lines',
-                name=f'Measured {name}',
+                name=f'{name}',
                 line=dict(color=wl_colors[wl], width=2),
                 marker=dict(color=wl_colors[wl], size=6),
                 legendgroup=f'wl{wl}',
@@ -4679,18 +4734,19 @@ def create_polarized_reflectance_plot(intensity_data, dolp_data, wavelengths, wl
                 name=f'Model {name}',
                 line=dict(color=wl_colors[wl], width=2, dash='dash'),
                 legendgroup=f'wl{wl}',
-                showlegend=True
+                showlegend=False
             )
         )
 
     # Update layout
     fig.update_layout(
-        title="Polarized Reflectance (DoLP * Intensity) vs Viewing Zenith Angle",
+        title=dict(text="Polarized Reflectance vs VZA", x=0.5, xanchor='center'),
         xaxis_title="Viewing Zenith Angle (degrees)",
         yaxis_title="Polarized Reflectance (DoLP * Intensity)",
+        yaxis=dict(range=yaxis_range) if yaxis_range is not None else {},
         height=800,
         showlegend=True,
-        margin=dict(l=50, r=40, t=60, b=40),
+        margin=dict(l=50, r=40, t=40, b=40),
         legend=dict(
             orientation="v",
             yanchor="top",
@@ -5905,6 +5961,27 @@ def run_app(initial_file_path, directory_path):
                                     style={'height': '800px', 'border': '1px solid #bdc3c7', 'borderRadius': '5px'}
                                 ),
                             ], style={'width': '49%', 'display': 'inline-block'}),
+                        ], style={'marginBottom': '20px'}),
+
+                        # Row 4: Side-by-side Polarized Reflectance Plots
+                        html.Div([
+                            html.Div([
+                                html.H4("Polarized Reflectance - File 1", id='file-1-polarized-header', style={'textAlign': 'center', 'margin': '0 0 10px 0'}),
+                                dcc.Graph(
+                                    id='scatter-polarized-plot-1',
+                                    figure=create_initial_combined_figure(),
+                                    style={'height': '800px', 'border': '1px solid #bdc3c7', 'borderRadius': '5px'}
+                                ),
+                            ], style={'width': '49%', 'display': 'inline-block', 'marginRight': '1%'}),
+
+                            html.Div([
+                                html.H4("Polarized Reflectance - File 2", id='file-2-polarized-header', style={'textAlign': 'center', 'margin': '0 0 10px 0'}),
+                                dcc.Graph(
+                                    id='scatter-polarized-plot-2',
+                                    figure=create_initial_combined_figure(),
+                                    style={'height': '800px', 'border': '1px solid #bdc3c7', 'borderRadius': '5px'}
+                                ),
+                            ], style={'width': '49%', 'display': 'inline-block'}),
                         ]),
                     ], id='multi-file-plots-container', style={
                             'display': 'none',
@@ -5925,11 +6002,11 @@ def run_app(initial_file_path, directory_path):
                             ),
                             # Instruction text
                             html.P(
-                                "Click a point on the map above to view Intensity/DoLP plots and properties below",
+                                "⚠️  Click a point on the map above to view Intensity/DoLP plots and properties below ⚠️",
                                 style={
                                     'textAlign': 'center',
                                     'color': '#e74c3c',
-                                    'fontSize': '16px',
+                                    'fontSize': '18px',
                                     'fontWeight': 'bold',
                                     'marginTop': '10px',
                                     'marginBottom': '0'
@@ -5972,7 +6049,16 @@ def run_app(initial_file_path, directory_path):
                                 figure=create_placeholder_figure(""),
                                 style={'height': '1000px'}
                             ),
-                        ], style={'marginBottom': '25px'}),
+                        ], id='combined-plot-container', style={'marginBottom': '120px', 'display': 'none'}),
+
+                        # Polarized Reflectance plot (below Intensity/DoLP)
+                        html.Div([
+                            dcc.Graph(
+                                id='scatter-polarized-plot-single',
+                                figure=create_placeholder_figure(""),
+                                style={'height': '600px'}
+                            ),
+                        ], id='scatter-polarized-container-single', style={'marginTop': '120px', 'marginBottom': '25px', 'display': 'none'}),
                     ], id='single-file-plots-container', style={'display': 'block'}),
 
                 ], id='plot-scatter', style={'display': 'none'}),
@@ -6206,11 +6292,11 @@ def run_app(initial_file_path, directory_path):
                         dcc.Graph(id='angular-scatter-plot-single', style={'height': '500px'}),
                         # Instruction text
                         html.P(
-                            "Click a point on the map above to view angular plots and properties below",
+                            "⚠️  Click a point on the map above to view angular plots/properties below ⚠️",
                             style={
                                 'textAlign': 'center',
                                 'color': '#e74c3c',
-                                'fontSize': '16px',
+                                'fontSize': '18px',
                                 'fontWeight': 'bold',
                                 'marginTop': '10px',
                                 'marginBottom': '0'
@@ -6302,8 +6388,7 @@ def run_app(initial_file_path, directory_path):
                         'borderRadius': '5px',
                         'backgroundColor': '#ffffff',
                         'marginTop': '20px',
-                        'maxWidth': '1200px',
-                        'margin': '20px auto',
+                        'marginBottom': '25px',
                         'display': 'none'  # Hidden until point clicked
                     }),
 
@@ -6638,12 +6723,16 @@ def run_app(initial_file_path, directory_path):
          Output('intensity-plot-2', 'figure'),
          Output('dolp-plot-1', 'figure'),
          Output('dolp-plot-2', 'figure'),
+         Output('scatter-polarized-plot-1', 'figure'),
+         Output('scatter-polarized-plot-2', 'figure'),
          Output('file-1-scatter-header', 'children'),
          Output('file-2-scatter-header', 'children'),
          Output('file-1-intensity-header', 'children'),
          Output('file-2-intensity-header', 'children'),
          Output('file-1-dolp-header', 'children'),
          Output('file-2-dolp-header', 'children'),
+         Output('file-1-polarized-header', 'children'),
+         Output('file-2-polarized-header', 'children'),
          Output('comparison-info-panel', 'children')],
         [Input('individual-analysis-mode', 'value'),
          Input('file-selector', 'value'),
@@ -6654,18 +6743,19 @@ def run_app(initial_file_path, directory_path):
          Input('scatter-plot-1', 'clickData')],
         prevent_initial_call=True
     )
-    def update_multi_file_plots(analysis_mode, file_path_1, file_path_2, selected_property, max_cost, clickData):
+    def update_scatter_multi(analysis_mode, file_path_1, file_path_2, selected_property, max_cost, clickData):
         from dash import callback_context
-        print("Doing callback: update_multi_file_plots")
+        print("Doing callback: update_scatter_multi")
 
         # Define number of returned figures/headers
-        NUM_FIGURES = 6
-        NUM_HEADERS = 6
+        NUM_FIGURES = 8
+        NUM_HEADERS = 8
 
         # Set defaults/initialize file comparison info
         default_info = html.P("No comparison active")
         default_headers = ["", "", "",
-                           "", "", ""]
+                           "", "", "",
+                           "", ""]
         comparison_info = html.P("Click a point on File 1 scatter plot to see comparison details",
                                  style={'color': '#7f8c8d', 'margin': '0'})
 
@@ -6959,7 +7049,7 @@ def run_app(initial_file_path, directory_path):
             scatter_fig_1 = create_scatter_plot_only(filtered_data_1, selected_property, original_indices_1, clicked_data_1, max_cost)
             scatter_fig_2 = create_scatter_plot_only(filtered_data_2, selected_property, original_indices_2, clicked_data_2, max_cost)
 
-            # Create intensity/dolp plots
+            # Create intensity/dolp/polarized plots
             if file1_row is not None and file2_row is not None:
                 # Generate actual plots
                 intensity_data_1, dolp_data_1, wavelengths_1 = get_channel_intensity_dolp_vza(data_dict_1, file1_row, file1_col)
@@ -6968,10 +7058,20 @@ def run_app(initial_file_path, directory_path):
                 wl_colors_1 = generate_wavelength_colors(wavelengths_1)
                 wl_colors_2 = generate_wavelength_colors(wavelengths_2)
 
-                intensity_fig_1 = create_intensity_plot_only(intensity_data_1, wavelengths_1, wl_colors_1, "Intensity")
-                intensity_fig_2 = create_intensity_plot_only(intensity_data_2, wavelengths_2, wl_colors_2, "Intensity")
-                dolp_fig_1 = create_dolp_plot_only(dolp_data_1, wavelengths_1, wl_colors_1, "DoLP")
-                dolp_fig_2 = create_dolp_plot_only(dolp_data_2, wavelengths_2, wl_colors_2, "DoLP")
+                # Compute shared y-axis ranges so side-by-side plots are comparable
+                intensity_yrange = compute_shared_yrange(intensity_data_1, intensity_data_2, ['y_meas', 'y_model'])
+                dolp_yrange = compute_shared_yrange(dolp_data_1, dolp_data_2, ['y_meas', 'y_model'])
+                polarized_yrange = compute_shared_yrange_polarized(
+                    intensity_data_1, dolp_data_1, intensity_data_2, dolp_data_2,
+                    list(set(wavelengths_1) | set(wavelengths_2))
+                )
+
+                intensity_fig_1 = create_intensity_plot_only(intensity_data_1, wavelengths_1, wl_colors_1, "Intensity", yaxis_range=intensity_yrange)
+                intensity_fig_2 = create_intensity_plot_only(intensity_data_2, wavelengths_2, wl_colors_2, "Intensity", yaxis_range=intensity_yrange)
+                dolp_fig_1 = create_dolp_plot_only(dolp_data_1, wavelengths_1, wl_colors_1, "DoLP", yaxis_range=dolp_yrange)
+                dolp_fig_2 = create_dolp_plot_only(dolp_data_2, wavelengths_2, wl_colors_2, "DoLP", yaxis_range=dolp_yrange)
+                polarized_fig_1 = create_polarized_reflectance_plot(intensity_data_1, dolp_data_1, wavelengths_1, wl_colors_1, yaxis_range=polarized_yrange)
+                polarized_fig_2 = create_polarized_reflectance_plot(intensity_data_2, dolp_data_2, wavelengths_2, wl_colors_2, yaxis_range=polarized_yrange)
             else:
                 # Placeholder plots
                 # No click data - show "click to select" messages
@@ -6983,6 +7083,10 @@ def run_app(initial_file_path, directory_path):
                 dolp_fig_1.layout.annotations[0].text = "Click a point on File 1 map to view DoLP plot"
                 dolp_fig_2 = create_initial_combined_figure()
                 dolp_fig_2.layout.annotations[0].text = "Click a point on File 2 map to view DoLP plot"
+                polarized_fig_1 = create_initial_combined_figure()
+                polarized_fig_1.layout.annotations[0].text = "Click a point on File 1 map to view Polarized Reflectance plot"
+                polarized_fig_2 = create_initial_combined_figure()
+                polarized_fig_2.layout.annotations[0].text = "Click a point on File 2 map to view Polarized Reflectance plot"
 
             # Create headers
             filename1 = os.path.basename(file_path_1)
@@ -6993,18 +7097,21 @@ def run_app(initial_file_path, directory_path):
                 filename1,
                 filename2,
                 filename1,
+                filename2,
+                filename1,
                 filename2
             ]
 
             return (scatter_fig_1, scatter_fig_2, intensity_fig_1, intensity_fig_2,
-                    dolp_fig_1, dolp_fig_2, *headers, comparison_info)
+                    dolp_fig_1, dolp_fig_2, polarized_fig_1, polarized_fig_2,
+                    *headers, comparison_info)
 
         except Exception as e:
             print(f"ERROR in multi-file plot callback: {e}")
             import traceback
             traceback.print_exc()
             error_fig = create_placeholder_figure(f"Error: {str(e)}")
-            return [error_fig] * 6 + default_headers + [default_info]
+            return [error_fig] * 8 + default_headers + [default_info]
 
     # ---------------------------------------------------
     # IMAGE/SWATH COMPARISON CALLBACK
@@ -7448,7 +7555,7 @@ def run_app(initial_file_path, directory_path):
          Input('angular-scatter-plot-single', 'clickData')],
         prevent_initial_call=True
     )
-    def update_angular_dependence_plots(analysis_mode, file_path_1, file_path_2,
+    def update_solar_geometry(analysis_mode, file_path_1, file_path_2,
                                         max_cost, plot_type, x_axis_type,
                                         click_multi, click_single):
         """
@@ -7456,7 +7563,7 @@ def run_app(initial_file_path, directory_path):
         quantity; Intensity, DoLP, and polar plots for the clicked point.
         Works in both single-file and multi-file modes.
         """
-        print("Doing callback: update_angular_dependence_plots")
+        print("Doing callback: update_solar_geometry")
 
         empty_fig = create_placeholder_figure("No data")
         click_msg = create_placeholder_figure("Click a point on the map to view angular plots")
@@ -7587,8 +7694,7 @@ def run_app(initial_file_path, directory_path):
                     'borderRadius': '5px',
                     'backgroundColor': '#ffffff',
                     'marginTop': '20px',
-                    'maxWidth': '1200px',
-                    'margin': '20px auto',
+                    'marginBottom': '25px',
                     'display': 'block'
                 }
 
@@ -7770,7 +7876,7 @@ def run_app(initial_file_path, directory_path):
                     visible_style_multi, click_info_1, properties_table_1, click_info_2, properties_table_2)  # multi properties
 
         except Exception as e:
-            print(f"Error in update_angular_dependence_plots: {e}")
+            print(f"Error in update_solar_geometry: {e}")
             import traceback
             traceback.print_exc()
             return (scatter_multi_style, scatter_single_style,
@@ -8481,11 +8587,11 @@ def run_app(initial_file_path, directory_path):
          Input('plot-type-selector', 'value')],
         prevent_initial_call=True
     )
-    def update_polarized_reflectance_plot(file_path_1, file_path_2, analysis_mode, difference_type, clicked_data, active_tab):
+    def update_polarized_tab(file_path_1, file_path_2, analysis_mode, difference_type, clicked_data, active_tab):
         """
         Enhanced callback for polarized reflectance plot with dual-file comparison capability
         """
-        print("Doing callback: update_polarized_reflectance_plot")
+        print("Doing callback: update_polarized_tab")
         if active_tab != 'polarized':
             return go.Figure()
 
@@ -9000,6 +9106,9 @@ def run_app(initial_file_path, directory_path):
     @app.callback(
         [Output('aerosol-plot', 'figure'),
          Output('combined-plot', 'figure'),
+         Output('scatter-polarized-plot-single', 'figure'),
+         Output('combined-plot-container', 'style'),
+         Output('scatter-polarized-container-single', 'style'),
          Output('clicked-point-store', 'data', allow_duplicate=True),
          Output('click-info', 'children'),
          Output('panel-properties-table', 'children'),
@@ -9018,9 +9127,9 @@ def run_app(initial_file_path, directory_path):
         # prevent_initial_call='initial_duplicate'
         prevent_initial_call=True
     )
-    def update_all_plots(selected_property, max_cost, clickData, find_button_clicks,
-                         current_file_data, input_lat, input_lon, stored_point_data, plot_type):
-        print("Doing callback: update_all_plots")
+    def update_scatter_single(selected_property, max_cost, clickData, find_button_clicks,
+                              current_file_data, input_lat, input_lon, stored_point_data, plot_type):
+        print("Doing callback: update_scatter_single")
 
         # Determine which input triggered callback
         ctx = callback_context
@@ -9038,14 +9147,14 @@ def run_app(initial_file_path, directory_path):
         if current_file_data is None:
             empty_fig = create_placeholder_figure("No file selected")
             hidden_style = {'display': 'none'}
-            return (empty_fig, empty_fig, None, "No file selected", "", hidden_style, "")
+            return (empty_fig, empty_fig, empty_fig, hidden_style, hidden_style, None, "No file selected", "", hidden_style, "")
 
         # Get current file path from store and read data
         file_path = current_file_data.get('file_path')
         if file_path is None:
             empty_fig = create_placeholder_figure("Please select a file to view data")
             hidden_style = {'display': 'none'}
-            return (empty_fig, empty_fig, None, "Please select a file", "", hidden_style, "")
+            return (empty_fig, empty_fig, empty_fig, hidden_style, hidden_style, None, "Please select a file", "", hidden_style, "")
 
         # Read data from cache NOT from current file path
         cached_data = get_cached_data(file_path)
@@ -9139,32 +9248,12 @@ def run_app(initial_file_path, directory_path):
         # Preserve the zoom when updating the figure with uirevision
         scatter_fig.update_layout(uirevision=uirevision_value)
 
-        # Create intensity and DoLP plots (first below is pre-click)
+        # Create intensity/DoLP and polarized reflectance plots
         combined_fig = go.Figure()
-
-        # Update figure format pre-click to match with post-click
-        # combined_fig.update_layout(
-        #     height=800,
-        #     showlegend=True,
-        #     # minimize overall margins
-        #     margin=dict(
-        #         l=50,  # left margin
-        #         r=40,  # right
-        #         t=40,  # top (default ~80)
-        #         b=40  # bottom
-        #     ),
-        #     autosize=True
-        # )
-        # # add pre click annotations
-        # combined_fig.add_annotation(
-        #     text="Click a point on the map to view Intensity and DoLP plots",
-        #     xref="x", yref="y",
-        #     x=2.5, y=1.5,
-        #     showarrow=False,
-        #     # font=dict(size=18, color="#7f8c8d"),
-        #     font=dict(size=18, color="black"),
-        #     xanchor='center', yanchor='middle'
-        # )
+        polarized_fig = go.Figure()
+        plots_hidden_style = {'display': 'none'}
+        combined_container_style = {'marginBottom': '120px', 'display': 'none'}
+        polarized_container_style = {'marginTop': '120px', 'marginBottom': '25px', 'display': 'none'}
 
         if clicked_point_data is not None and 'row' in clicked_point_data:
             selected_row = clicked_point_data['row']
@@ -9179,6 +9268,14 @@ def run_app(initial_file_path, directory_path):
                 combined_fig = create_combined_intensity_dolp_plot(
                     intensity_data, dolp_data, wavelengths, wl_colors, file_format, data_dict
                 )
+
+                # Create polarized reflectance plot
+                polarized_fig = create_polarized_reflectance_plot(
+                    intensity_data, dolp_data, wavelengths, wl_colors
+                )
+
+                combined_container_style = {'marginBottom': '20px', 'display': 'block'}
+                polarized_container_style = {'marginTop': '20px', 'marginBottom': '25px', 'display': 'block'}
 
             except Exception as e:
                 print(f"Error creating intensity/DoLP plots: {e}")
@@ -9269,7 +9366,8 @@ def run_app(initial_file_path, directory_path):
         # Create file header (file name only, no path)
         file_header = os.path.basename(file_path) if file_path else ""
 
-        return (scatter_fig, combined_fig,
+        return (scatter_fig, combined_fig, polarized_fig,
+                combined_container_style, polarized_container_style,
                 clicked_point_data, click_info, properties_table, panel_style, file_header)
 
     # ---------------------------------------------------

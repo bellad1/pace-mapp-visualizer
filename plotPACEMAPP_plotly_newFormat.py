@@ -2778,13 +2778,14 @@ def create_polar_angular_plot(intensity_data, dolp_data, wavelengths, wl_colors,
             name=f'{int(wl)} nm',
             marker=dict(
                 color=y_vals,
-                colorscale='Viridis',
+                colorscale='Turbo',
                 size=10,
                 showscale=bool(wl == wavelengths[0]),
                 colorbar=dict(
                     title=y_label,
                     thickness=15,
-                    len=0.7
+                    len=0.7,
+                    exponentformat='e'
                 ),
                 line=dict(color=color, width=1)
             ),
@@ -2989,7 +2990,7 @@ def create_scatter_plot_only(data_dict, selected_property, original_indices, cli
             marker=dict(
                 size=4,
                 color=color_valid,
-                colorscale='Viridis',
+                colorscale='Turbo',
                 colorbar=dict(
                     # title=selected_property,
                     title=colorbar_title,
@@ -3002,7 +3003,8 @@ def create_scatter_plot_only(data_dict, selected_property, original_indices, cli
                     title_side='top',
                     thickness=15,
                     outlinewidth=1,
-                    outlinecolor='black'
+                    outlinecolor='black',
+                    exponentformat='e'
                 ),
                 showscale=True,
                 cmin=min_val,
@@ -3160,7 +3162,7 @@ def create_image_swath_scatter(pace_data_dict, rsp_data_dict, matching_results, 
         marker=dict(
             size=3,
             color=pace_prop[pace_valid],
-            colorscale='Viridis',
+            colorscale='Turbo',
             cmin=vmin,
             cmax=vmax,
             opacity=0.5,
@@ -3175,7 +3177,8 @@ def create_image_swath_scatter(pace_data_dict, rsp_data_dict, matching_results, 
                 title_side='top',
                 thickness=15,
                 outlinewidth=1,
-                outlinecolor='black'
+                outlinecolor='black',
+                exponentformat='e'
             ),
             showscale=True
         ),
@@ -3192,7 +3195,7 @@ def create_image_swath_scatter(pace_data_dict, rsp_data_dict, matching_results, 
         marker=dict(
             size=10,
             color=rsp_prop,
-            colorscale='Viridis',
+            colorscale='Turbo',
             cmin=vmin,
             cmax=vmax,
             opacity=1.0
@@ -3363,7 +3366,7 @@ def create_angular_scatter_plot(filtered_data, color_values, color_label, clicke
         marker=dict(
             size=4,
             color=plot_vals,
-            colorscale='Viridis',
+            colorscale='Turbo',
             cmin=vmin,
             cmax=vmax,
             colorbar=dict(
@@ -3377,7 +3380,8 @@ def create_angular_scatter_plot(filtered_data, color_values, color_label, clicke
                 title_side='top',
                 thickness=15,
                 outlinewidth=1,
-                outlinecolor='black'
+                outlinecolor='black',
+                exponentformat='e'
             ),
             showscale=True
         ),
@@ -4360,7 +4364,7 @@ def create_property_vs_index_plot(data_dict, matching_results, selected_property
         y=prop_values,
         # mode='lines+markers',
         mode='markers',
-        marker=dict(size=8, color=prop_values, colorscale='Viridis'),
+        marker=dict(size=8, color=prop_values, colorscale='Turbo'),
         line=dict(width=2),
         customdata=customdata,
         hovertemplate=(
@@ -4872,7 +4876,7 @@ def create_export_figure(data_dict, selected_property, original_indices,
             marker=dict(
                 size=4,
                 color=color_valid,
-                colorscale='Viridis',
+                colorscale='Turbo',
                 colorbar=dict(
                     title=selected_property,
                     x=0.175,  # position over map
@@ -4884,7 +4888,8 @@ def create_export_figure(data_dict, selected_property, original_indices,
                     title_side='top',
                     thickness=15,
                     outlinewidth=1,
-                    outlinecolor='black'
+                    outlinecolor='black',
+                    exponentformat='e'
                 ),
                 showscale=True,
                 cmin=min_val,
@@ -5510,7 +5515,7 @@ def create_simple_kml_content(data_dict, selected_property, original_indices):
           <tr><th style="background-color: #f2f2f2; padding: 8px;">Minimum Value</th><td style="padding: 8px;">{min_val:.5f}</td></tr>
           <tr><th style="background-color: #f2f2f2; padding: 8px;">Maximum Value</th><td style="padding: 8px;">{max_val:.5f}</td></tr>
           <tr><th style="background-color: #f2f2f2; padding: 8px;">Valid Points Shown</th><td style="padding: 8px;">{len(indices_sample)}</td></tr>
-          <tr><th style="background-color: #f2f2f2; padding: 8px;">Color Scale</th><td style="padding: 8px;">Viridis (Purple=Low → Yellow=High)</td></tr>
+          <tr><th style="background-color: #f2f2f2; padding: 8px;">Color Scale</th><td style="padding: 8px;">Turbo (Blue=Low → Red=High)</td></tr>
         </table>
         <p><strong>Note:</strong> Click on any data point to see detailed information.</p>
       ]]></description>

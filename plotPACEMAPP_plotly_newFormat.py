@@ -4566,23 +4566,41 @@ def create_polarized_reflectance_comparison_plot(intensity_data_1, dolp_data_1,
     return fig
 
 
-def create_aod_histogram(data_dict, selected_property, max_cost, bin_size=0.1):
+def create_property_histogram(data_dict, selected_property, max_cost, n_bins=50,
+                              label=None, color='steelblue'):
     """
-    Create histogram of AOD values for selected wavelength with cost filtering
-    bin_size: Size of histogram bins (set at 0.1)
+    Create histogram of any retrieval property with cost filtering.
+    label: trace name for legend; None hides legend
+    color: bar color (e.g. 'steelblue' for File 1, 'firebrick' for File 2)
+    n_bins: number of histogram bins (default 50)
     """
 
     # Filter data by cost function first
     filtered_data, original_indices = filter_by_cost(data_dict, max_cost)
 
-    # Get the AOD data for the selected property
-    aod_data = filtered_data[selected_property].flatten()
+    # Get the data for the selected property
+    prop_data = filtered_data[selected_property].flatten()
 
     # Remove invalid values
-    valid_mask = np.isfinite(aod_data)
-    aod_valid = aod_data[valid_mask]
+    valid_mask = np.isfinite(prop_data)
+    prop_valid = prop_data[valid_mask]
 
-    if len(aod_valid) == 0:
+    # Fix property name to make title
+    wavelengths = data_dict['wavelengths']
+    title_property = selected_property.replace('_', ' ').title()
+    for wl in wavelengths:
+        wl_str = str(int(wl))
+        title_property = title_property.replace(f'{wl_str}', f'{wl_str} nm')
+    replacements = {
+        'Optical Depth': 'AOD',
+        'Fine': '(Fine Mode)',
+        'Coarse': '(Coarse Mode)',
+        'Total': '(Total)'
+    }
+    for old, new in replacements.items():
+        title_property = title_property.replace(old, new)
+
+    if len(prop_valid) == 0:
         # Return empty figure if there's no valid data
         fig = go.Figure()
         fig.add_annotation(
@@ -4593,40 +4611,19 @@ def create_aod_histogram(data_dict, selected_property, max_cost, bin_size=0.1):
             font=dict(size=16)
         )
         fig.update_layout(
-            title="AOD Frequency Histogram",
-            xaxis_title="AOD Value",
+            title=f"Retrieval Property Frequency Histogram: {title_property}",
+            xaxis_title=title_property,
             yaxis_title="Frequency",
             height=500
         )
         return fig
 
-    # Calculate bins
-    min_val = np.floor(np.min(aod_valid) / bin_size) * bin_size
-    max_val = np.ceil(np.max(aod_valid) / bin_size) * bin_size
-    bins = np.arange(min_val, max_val + bin_size, bin_size)
-
-    # Compute the histogram
-    counts, bin_edges = np.histogram(aod_valid, bins=bins)
+    # Compute the histogram using n_bins equal-width bins
+    counts, bin_edges = np.histogram(prop_valid, bins=n_bins)
+    bin_size = bin_edges[1] - bin_edges[0]
 
     # Create bin centers
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-
-    # Fix property name to make title
-    wavelengths = data_dict['wavelengths']
-    title_property = selected_property.replace('_', ' ').title()
-    for wl in wavelengths:
-        wl_str = str(int(wl))
-        title_property = title_property.replace(f'{wl_str}', f'{wl_str} nm')
-
-    # More cleanup
-    replacements = {
-        'Optical Depth': 'AOD',
-        'Fine': '(Fine Mode)',
-        'Coarse': '(Coarse Mode)',
-        'Total': '(Total)'
-    }
-    for old, new in replacements.items():
-        title_property = title_property.replace(old, new)
 
     # Create the histogram plot
     fig = go.Figure()
@@ -4636,13 +4633,14 @@ def create_aod_histogram(data_dict, selected_property, max_cost, bin_size=0.1):
             x=bin_centers,
             y=counts,
             width=bin_size,
+            name=label if label else '',
             marker=dict(
-                color='steelblue',
+                color=color,
                 opacity=0.7,
-                line=dict(color='darkblue', width=1)
+                line=dict(color=color, width=0.5)
             ),
             hovertemplate=(
-                'AOD Range: %{x:.2f} - %{customdata:.2f}<br>' +
+                'Value Range: %{x:.3f} - %{customdata:.3f}<br>' +
                 'Frequency: %{y}<br>' +
                 '<extra></extra>'
             ),
@@ -4652,11 +4650,11 @@ def create_aod_histogram(data_dict, selected_property, max_cost, bin_size=0.1):
 
     # Add statistics summary
     stats_text = (
-        f"Total Points: {len(aod_valid)}<br>" +
-        f"Mean: {np.mean(aod_valid):.3f}<br>" +
-        f"Std: {np.std(aod_valid):.3f}<br>" +
-        f"Min: {np.min(aod_valid):.3f}<br>" +
-        f"Max: {np.max(aod_valid):.3f}"
+        f"N: {len(prop_valid)}<br>" +
+        f"Mean: {np.mean(prop_valid):.3f}<br>" +
+        f"Std: {np.std(prop_valid):.3f}<br>" +
+        f"Min: {np.min(prop_valid):.3f}<br>" +
+        f"Max: {np.max(prop_valid):.3f}"
     )
 
     fig.add_annotation(
@@ -4671,12 +4669,12 @@ def create_aod_histogram(data_dict, selected_property, max_cost, bin_size=0.1):
     )
 
     fig.update_layout(
-        title=f"AOD Frequency Histogram: {title_property}<br><sub>Cost Filter: {max_cost:.2f}</sub>",
-        xaxis_title="AOD Value",
+        title=f"Retrieval Property Frequency Histogram: {title_property}<br><sub>Cost Filter: {max_cost:.2f}</sub>",
+        xaxis_title=title_property,
         yaxis_title="Frequency",
         height=500,
         margin=dict(l=60, r=20, t=80, b=60),
-        showlegend=False
+        showlegend=(label is not None)
     )
 
     return fig
@@ -5657,7 +5655,7 @@ def run_app(initial_file_path, directory_path):
                             placeholder="Please select a second file...",
                             style={
                                 'marginBottom': '15px',
-                                'fontSize': '12px'
+                                'fontSize': '14px'
                             }
                         ),
                     ], id='individual-file-2-container', style={'display': 'none'}),
@@ -5673,7 +5671,7 @@ def run_app(initial_file_path, directory_path):
                         dcc.Dropdown(
                             id='plot-type-selector',
                             options=[
-                                {'label': 'About', 'value': 'about'},
+                                {'label': 'About the Visualizer', 'value': 'about'},
                                 {'label': 'Scatter + Intensity/DoLP', 'value': 'scatter'},
                                 {'label': 'Polarized Reflectance', 'value': 'polarized'},
                                 {'label': 'Residual Analysis', 'value': 'residual'},
@@ -5683,7 +5681,7 @@ def run_app(initial_file_path, directory_path):
                             value='about',  # Default to About on startup
                             style={
                                 'marginBottom': '20px',
-                                'fontSize': '16px'
+                                'fontSize': '14px'
                             }
                         ),
                     ]),
@@ -5770,6 +5768,80 @@ def run_app(initial_file_path, directory_path):
                         ),
                     ], id='property-selector-2-container', style={'display': 'none', 'marginTop': '15px', 'marginBottom': '20px'}),
 
+                    # Histogram property selectors (Histogram tab only)
+                    html.Div([
+                        html.Label("Select Retrieval Property:",
+                                   id='hist-property-selector-label',
+                                   style={
+                                       'fontWeight': 'bold',
+                                       'marginBottom': '10px',
+                                       'display': 'block',
+                                       'fontSize': '16px'
+                                   }),
+                        dcc.Dropdown(
+                            id='hist-property-selector',
+                            options=[],
+                            value=None,
+                            placeholder="",
+                            style={
+                                'height': '24px',
+                                'fontSize': '16px'
+                            }
+                        ),
+                        html.Div([
+                            html.Label("Number of Bins:", style={
+                                'fontWeight': 'bold',
+                                'marginRight': '10px',
+                                'fontSize': '14px'
+                            }),
+                            dcc.Input(
+                                id='hist-bin-count',
+                                type='number',
+                                value=50,
+                                min=5,
+                                max=500,
+                                step=1,
+                                style={'width': '70px', 'fontSize': '14px'}
+                            ),
+                        ], style={'display': 'flex', 'alignItems': 'center', 'marginTop': '10px'}),
+                    ], id='hist-property-selector-container', style={'display': 'none', 'marginBottom': '20px'}),
+
+                    # File 2 histogram property selector (Histogram tab, Compare Files mode only)
+                    html.Div([
+                        html.Label("File 2 - Retrieval Property:", style={
+                            'fontWeight': 'bold',
+                            'marginBottom': '5px',
+                            'display': 'block',
+                            'fontSize': '16px'
+                        }),
+                        dcc.Dropdown(
+                            id='hist-property-selector-2',
+                            options=[],
+                            value=None,
+                            placeholder="Select file 2 first",
+                            style={
+                                'height': '24px',
+                                'fontSize': '16px'
+                            }
+                        ),
+                        html.Div([
+                            html.Label("Number of Bins:", style={
+                                'fontWeight': 'bold',
+                                'marginRight': '10px',
+                                'fontSize': '14px'
+                            }),
+                            dcc.Input(
+                                id='hist-bin-count-2',
+                                type='number',
+                                value=50,
+                                min=5,
+                                max=500,
+                                step=1,
+                                style={'width': '70px', 'fontSize': '14px'}
+                            ),
+                        ], style={'display': 'flex', 'alignItems': 'center', 'marginTop': '10px'}),
+                    ], id='hist-property-selector-2-container', style={'display': 'none', 'marginTop': '15px', 'marginBottom': '20px'}),
+
                     # Cost selector
                     html.Div([
                         html.Label("Cost Filter:",
@@ -5794,7 +5866,7 @@ def run_app(initial_file_path, directory_path):
                                 style={
                                     'width': '45%',
                                     'height': '24px',
-                                    'fontSize': '12px',
+                                    'fontSize': '14px',
                                     'marginRight': '2%',
                                     'textAlign': 'center'
                                 }
@@ -6006,6 +6078,27 @@ def run_app(initial_file_path, directory_path):
                                     style={'height': '800px', 'border': '1px solid #bdc3c7', 'borderRadius': '5px'}
                                 ),
                             ], style={'width': '49%', 'display': 'inline-block'}),
+                        ], style={'marginBottom': '20px'}),
+
+                        # Row 5: Side-by-side Polar Plots
+                        html.Div([
+                            html.Div([
+                                html.H4("Polar - File 1", id='file-1-polar-header', style={'textAlign': 'center', 'margin': '0 0 10px 0'}),
+                                dcc.Graph(
+                                    id='scatter-polar-plot-1',
+                                    figure=create_initial_combined_figure(),
+                                    style={'height': '550px', 'border': '1px solid #bdc3c7', 'borderRadius': '5px'}
+                                ),
+                            ], style={'width': '49%', 'display': 'inline-block', 'marginRight': '1%'}),
+
+                            html.Div([
+                                html.H4("Polar - File 2", id='file-2-polar-header', style={'textAlign': 'center', 'margin': '0 0 10px 0'}),
+                                dcc.Graph(
+                                    id='scatter-polar-plot-2',
+                                    figure=create_initial_combined_figure(),
+                                    style={'height': '550px', 'border': '1px solid #bdc3c7', 'borderRadius': '5px'}
+                                ),
+                            ], style={'width': '49%', 'display': 'inline-block'}),
                         ]),
                     ], id='multi-file-plots-container', style={
                             'display': 'none',
@@ -6083,6 +6176,15 @@ def run_app(initial_file_path, directory_path):
                                 style={'height': '600px'}
                             ),
                         ], id='scatter-polarized-container-single', style={'marginTop': '120px', 'marginBottom': '25px', 'display': 'none'}),
+
+                        # Polar plot (below Polarized Reflectance)
+                        html.Div([
+                            dcc.Graph(
+                                id='scatter-polar-plot-single',
+                                figure=create_placeholder_figure(""),
+                                style={'height': '550px'}
+                            ),
+                        ], id='scatter-polar-container-single', style={'marginTop': '40px', 'marginBottom': '25px', 'display': 'none'}),
                     ], id='single-file-plots-container', style={'display': 'block'}),
 
                 ], id='plot-scatter', style={'display': 'none'}),
@@ -6111,21 +6213,43 @@ def run_app(initial_file_path, directory_path):
 
                 # Histogram plot
                 html.Div([
-                    html.H2("AOD Frequency Distribution",
+                    html.H2("Retrieval Property Frequency Distribution",
                             style={'textAlign': 'center', 'marginBottom': '20px'}),
                     html.P([
-                        "This histogram shows the frequency distribution of AOD values for the selected property and cost filter. ",
-                        "Use the controls on the left to select different wavelengths and adjust the cost threshold."
+                        "This histogram shows the frequency distribution of the selected retrieval property. ",
+                        "Use the controls on the left to select a property, number of bins, and cost threshold. ",
+                        "In Compare Files mode, each file is shown in its own plot."
                     ], style={'textAlign': 'center', 'marginBottom': '20px', 'fontSize': '14px', 'marginLeft': '10%', 'marginRight': '10%'}),
-                    dcc.Graph(
-                        id='aod-histogram',
-                        figure=create_placeholder_figure("Select a file and property to view histogram"),
-                        config={
-                            'displayModeBar': True,
-                            'displaylogo': False,
-                            'modeBarButtonsToRemove': ['lasso2d', 'select2d']
-                        }
-                    )
+                    html.Div([
+                        # File 1 histogram
+                        html.Div([
+                            html.H4('', id='hist-file-1-header',
+                                    style={'textAlign': 'center', 'marginBottom': '5px', 'display': 'none'}),
+                            dcc.Graph(
+                                id='aod-histogram',
+                                figure=create_placeholder_figure("Select a file and property to view histogram"),
+                                config={
+                                    'displayModeBar': True,
+                                    'displaylogo': False,
+                                    'modeBarButtonsToRemove': ['lasso2d', 'select2d']
+                                }
+                            ),
+                        ], id='hist-file-1-container', style={'width': '100%'}),
+                        # File 2 histogram (hidden in single-file mode)
+                        html.Div([
+                            html.H4('', id='hist-file-2-header',
+                                    style={'textAlign': 'center', 'marginBottom': '5px'}),
+                            dcc.Graph(
+                                id='aod-histogram-2',
+                                figure=create_placeholder_figure(""),
+                                config={
+                                    'displayModeBar': True,
+                                    'displaylogo': False,
+                                    'modeBarButtonsToRemove': ['lasso2d', 'select2d']
+                                }
+                            ),
+                        ], id='hist-file-2-container', style={'display': 'none', 'width': '50%', 'paddingLeft': '10px'}),
+                    ], style={'display': 'flex', 'flexDirection': 'row', 'alignItems': 'flex-start'}),
                 ], id='plot-histogram', style={'display': 'none', 'padding': '20px'}),
 
                 # AOD Total plot
@@ -6503,7 +6627,7 @@ def run_app(initial_file_path, directory_path):
         """
         # Base options available for all files
         base_options = [
-            {'label': 'About', 'value': 'about'},
+            {'label': 'About the Visualizer', 'value': 'about'},
             {'label': 'Scatter + Intensity/DoLP', 'value': 'scatter'},
             {'label': 'Solar and Instrument Geometry', 'value': 'angular_dependence'},
             {'label': 'Polarized Reflectance', 'value': 'polarized'},
@@ -6720,7 +6844,10 @@ def run_app(initial_file_path, directory_path):
          Output('residual-controls-container', 'style'),
          Output('property-selector-container', 'style'),
          Output('property-selector-2-container', 'style'),
-         Output('property-selector-label', 'children')],
+         Output('property-selector-label', 'children'),
+         Output('hist-property-selector-container', 'style'),
+         Output('hist-property-selector-2-container', 'style'),
+         Output('hist-property-selector-label', 'children')],
         [Input('plot-type-selector', 'value'),
          Input('individual-analysis-mode', 'value')]
     )
@@ -6728,6 +6855,7 @@ def run_app(initial_file_path, directory_path):
         print(f"Updating plot-specific controls for: {plot_type}, mode: {analysis_mode}")
 
         is_scatter = (plot_type == 'scatter')
+        is_histogram = (plot_type == 'histogram')
         is_multi = (analysis_mode == 'multiple')
 
         # Polarized controls: show only for polarized plot AND when in compare mode
@@ -6741,13 +6869,22 @@ def run_app(initial_file_path, directory_path):
         prop_style = {'display': 'block', 'marginBottom': '20px'} if is_scatter else {'display': 'none'}
 
         # File 2 property selector: visible on Scatter tab in Compare Files mode only
-        # marginTop controls space above (gap between the two dropdowns); marginBottom controls space before Cost Filter
         prop2_style = {'display': 'block', 'marginTop': '15px', 'marginBottom': '20px'} if (is_scatter and is_multi) else {'display': 'none'}
 
-        # Label: distinguish single vs. compare files
+        # Scatter label: distinguish single vs. compare files
         prop_label = "File 1 - Retrieval Property:" if (is_scatter and is_multi) else "Select Retrieval Property:"
 
-        return polarized_style, residual_style, prop_style, prop2_style, prop_label
+        # Histogram property selector: visible on Histogram tab only
+        hist_style = {'display': 'block', 'marginBottom': '20px'} if is_histogram else {'display': 'none'}
+
+        # File 2 histogram property selector: visible on Histogram tab in Compare Files mode only
+        hist2_style = {'display': 'block', 'marginTop': '15px', 'marginBottom': '20px'} if (is_histogram and is_multi) else {'display': 'none'}
+
+        # Histogram label: distinguish single vs. compare files
+        hist_label = "File 1 - Retrieval Property:" if (is_histogram and is_multi) else "Select Retrieval Property:"
+
+        return (polarized_style, residual_style, prop_style, prop2_style, prop_label,
+                hist_style, hist2_style, hist_label)
 
     # ---------------------------------------------------
     # ORIGINAL CALLBACKS START HERE
@@ -6766,6 +6903,8 @@ def run_app(initial_file_path, directory_path):
          Output('dolp-plot-2', 'figure'),
          Output('scatter-polarized-plot-1', 'figure'),
          Output('scatter-polarized-plot-2', 'figure'),
+         Output('scatter-polar-plot-1', 'figure'),
+         Output('scatter-polar-plot-2', 'figure'),
          Output('file-1-scatter-header', 'children'),
          Output('file-2-scatter-header', 'children'),
          Output('file-1-intensity-header', 'children'),
@@ -6774,6 +6913,8 @@ def run_app(initial_file_path, directory_path):
          Output('file-2-dolp-header', 'children'),
          Output('file-1-polarized-header', 'children'),
          Output('file-2-polarized-header', 'children'),
+         Output('file-1-polar-header', 'children'),
+         Output('file-2-polar-header', 'children'),
          Output('comparison-info-panel', 'children')],
         [Input('individual-analysis-mode', 'value'),
          Input('file-selector', 'value'),
@@ -6794,14 +6935,14 @@ def run_app(initial_file_path, directory_path):
         print("Doing callback: update_scatter_multi")
 
         # Define number of returned figures/headers
-        NUM_FIGURES = 8
-        NUM_HEADERS = 8
+        NUM_FIGURES = 10
+        NUM_HEADERS = 10
 
         # Set defaults/initialize file comparison info
         default_info = html.P("No comparison active")
         default_headers = ["", "", "",
                            "", "", "",
-                           "", ""]
+                           "", "", "", ""]
         comparison_info = html.P("Click a point on File 1 scatter plot to see comparison details",
                                  style={'color': '#7f8c8d', 'margin': '0'})
 
@@ -7244,9 +7385,10 @@ def run_app(initial_file_path, directory_path):
                 dolp_fig_2 = create_dolp_plot_only(dolp_data_2, wavelengths_2, wl_colors_2, "DoLP", yaxis_range=dolp_yrange)
                 polarized_fig_1 = create_polarized_reflectance_plot(intensity_data_1, dolp_data_1, wavelengths_1, wl_colors_1, yaxis_range=polarized_yrange)
                 polarized_fig_2 = create_polarized_reflectance_plot(intensity_data_2, dolp_data_2, wavelengths_2, wl_colors_2, yaxis_range=polarized_yrange)
+                polar_fig_1 = create_polar_angular_plot(intensity_data_1, dolp_data_1, wavelengths_1, wl_colors_1, 'intensity', os.path.basename(file_path_1))
+                polar_fig_2 = create_polar_angular_plot(intensity_data_2, dolp_data_2, wavelengths_2, wl_colors_2, 'intensity', os.path.basename(file_path_2))
             else:
-                # Placeholder plots
-                # No click data - show "click to select" messages
+                # Placeholder plots — no click data
                 intensity_fig_1 = create_initial_combined_figure()
                 intensity_fig_1.layout.annotations[0].text = "Click a point on File 1 map to view Intensity plot"
                 intensity_fig_2 = create_initial_combined_figure()
@@ -7259,23 +7401,25 @@ def run_app(initial_file_path, directory_path):
                 polarized_fig_1.layout.annotations[0].text = "Click a point on File 1 map to view Polarized Reflectance plot"
                 polarized_fig_2 = create_initial_combined_figure()
                 polarized_fig_2.layout.annotations[0].text = "Click a point on File 2 map to view Polarized Reflectance plot"
+                polar_fig_1 = create_initial_combined_figure()
+                polar_fig_1.layout.annotations[0].text = "Click a point on File 1 map to view Polar plot"
+                polar_fig_2 = create_initial_combined_figure()
+                polar_fig_2.layout.annotations[0].text = "Click a point on File 2 map to view Polar plot"
 
-            # Create headers
+            # Create headers (one per file per row: scatter, intensity, DoLP, polarized, polar)
             filename1 = os.path.basename(file_path_1)
             filename2 = os.path.basename(file_path_2)
             headers = [
-                filename1,
-                filename2,
-                filename1,
-                filename2,
-                filename1,
-                filename2,
-                filename1,
-                filename2
+                filename1, filename2,  # scatter
+                filename1, filename2,  # intensity
+                filename1, filename2,  # DoLP
+                filename1, filename2,  # polarized reflectance
+                filename1, filename2,  # polar
             ]
 
             return (scatter_fig_1, scatter_fig_2, intensity_fig_1, intensity_fig_2,
                     dolp_fig_1, dolp_fig_2, polarized_fig_1, polarized_fig_2,
+                    polar_fig_1, polar_fig_2,
                     *headers, comparison_info)
 
         except Exception as e:
@@ -7283,7 +7427,7 @@ def run_app(initial_file_path, directory_path):
             import traceback
             traceback.print_exc()
             error_fig = create_placeholder_figure(f"Error: {str(e)}")
-            return [error_fig] * 8 + default_headers + [default_info]
+            return [error_fig] * 10 + default_headers + [default_info]
 
     # ---------------------------------------------------
     # IMAGE/SWATH COMPARISON CALLBACK
@@ -8686,82 +8830,116 @@ def run_app(initial_file_path, directory_path):
             return None, f"Error: {str(e)}", "", {'display': 'none'}
 
     # ---------------------------------------------------
-    # AOD HISTOGRAM CALLBACK (4 of 18 total)
+    # HISTOGRAM CALLBACK (4 of 18 total)
     # ---------------------------------------------------
     @app.callback(
-      Output('aod-histogram', 'figure'),
-      [Input('property-selector', 'value'),
-       # Input('cost-input', 'value'),
+      [Output('aod-histogram', 'figure'),
+       Output('aod-histogram-2', 'figure'),
+       Output('hist-file-1-container', 'style'),
+       Output('hist-file-2-container', 'style'),
+       Output('hist-file-1-header', 'children'),
+       Output('hist-file-1-header', 'style'),
+       Output('hist-file-2-header', 'children')],
+      [Input('hist-property-selector', 'value'),
+       Input('hist-property-selector-2', 'value'),
+       Input('hist-bin-count', 'value'),
+       Input('hist-bin-count-2', 'value'),
        Input('applied-cost-value', 'data'),
-       Input('current-file-data', 'data')],
+       Input('current-file-data', 'data'),
+       Input('individual-analysis-mode', 'value')],
+      [State('individual-file-selector-2', 'value')],
       prevent_initial_call=True
       )
-    def update_histogram(selected_property, max_cost, current_file_data):
+    def update_histogram(selected_property, selected_property_2, n_bins, n_bins_2,
+                         max_cost, current_file_data, analysis_mode, file_path_2):
         """
-        Update histogram based on selected property and cost threshold
+        Update histogram based on selected property, bin count, and cost threshold.
+        Supports both Single File and Compare Files modes.
         """
         print("Doing callback: update_histogram")
 
-        # Check if we have valid inputs
-        if current_file_data is None or selected_property is None:
-            empty_fig = go.Figure()
-            empty_fig.add_annotation(
-                text="No data available - please select a file and property in the main visualization tab",
+        is_multi = (analysis_mode == 'multiple')
+        empty_fig = go.Figure()
+
+        # Sanitize bin counts
+        n_bins = int(n_bins) if n_bins and n_bins >= 5 else 50
+        n_bins_2 = int(n_bins_2) if n_bins_2 and n_bins_2 >= 5 else 50
+
+        def make_empty_fig(message="Select a file and property to view histogram"):
+            fig = go.Figure()
+            fig.add_annotation(
+                text=message,
                 x=0.5, y=0.5,
                 xref="paper", yref="paper",
                 showarrow=False,
                 font=dict(size=16)
             )
-            empty_fig.update_layout(
-                title="AOD Frequency Histogram",
-                xaxis_title="AOD Value",
+            fig.update_layout(
+                title="Retrieval Property Frequency Histogram",
+                xaxis_title="Value",
                 yaxis_title="Frequency",
                 height=500
             )
-            return empty_fig
+            return fig
 
-        # Get current file path and read
-        file_path = current_file_data.get('file_path')
-        if file_path is None:
-            empty_fig = go.Figure()
-            empty_fig.add_annotation(
-                text="No file path found",
-                x=0.5, y=0.5,
-                xref="paper", yref="paper",
-                showarrow=False,
-                font=dict(size=16)
-            )
-            return empty_fig
+        # Styles for single vs. compare layout
+        single_style = {'width': '100%'}
+        compare_style_1 = {'width': '50%', 'paddingRight': '10px'}
+        compare_style_2 = {'width': '50%', 'paddingLeft': '10px'}
+        hidden_style = {'display': 'none'}
+        header_hidden = {'textAlign': 'center', 'marginBottom': '5px', 'display': 'none'}
+        header_visible = {'textAlign': 'center', 'marginBottom': '5px', 'display': 'block'}
+
+        # Check if we have valid inputs
+        if current_file_data is None or selected_property is None:
+            return (make_empty_fig(), empty_fig, single_style, hidden_style,
+                    '', header_hidden, '')
+
+        file_path_1 = current_file_data.get('file_path')
+        if file_path_1 is None:
+            return (make_empty_fig("No file path found"), empty_fig, single_style,
+                    hidden_style, '', header_hidden, '')
+
+        # Use default max cost if not given
+        if max_cost is None:
+            max_cost = current_file_data.get('max_cost_value', 200.0)
 
         try:
-            # Read data from current file path
-            data_dict, sorted_variables, display_names, variable_metadata = load_retrieval_file(file_path)
+            data_dict_1, _, _, _ = load_retrieval_file(file_path_1)
 
-            # Use 200 as a default max cost if not given
-            if max_cost is None:
-                max_cost = current_file_data.get('max_cost_value', 200.0)
+            if is_multi and file_path_2 and selected_property_2:
+                # --- Compare Files mode: separate side-by-side plots ---
+                data_dict_2, _, _, _ = load_retrieval_file(file_path_2)
 
-            # Create the histogram
-            histogram_fig = create_aod_histogram(data_dict, selected_property, max_cost)
-            return histogram_fig
+                fig1 = create_property_histogram(
+                    data_dict_1, selected_property, max_cost,
+                    n_bins=n_bins, color='steelblue'
+                )
+                fig2 = create_property_histogram(
+                    data_dict_2, selected_property_2, max_cost,
+                    n_bins=n_bins_2, color='firebrick'
+                )
+
+                header_1 = os.path.basename(file_path_1)
+                header_2 = os.path.basename(file_path_2)
+
+                return (fig1, fig2, compare_style_1, compare_style_2,
+                        header_1, header_visible, header_2)
+
+            else:
+                # --- Single File mode ---
+                fig1 = create_property_histogram(
+                    data_dict_1, selected_property, max_cost, n_bins=n_bins
+                )
+                return (fig1, empty_fig, single_style, hidden_style,
+                        '', header_hidden, '')
 
         except Exception as e:
             print(f"Error creating histogram: {e}")
-            error_fig = go.Figure()
-            error_fig.add_annotation(
-                text=f"Error loading histogram data: {str(e)}",
-                x=0.5, y=0.5,
-                xref="paper", yref="paper",
-                showarrow=False,
-                font=dict(size=16)
-            )
-            error_fig.update_layout(
-                title="AOD Frequency Histogram",
-                xaxis_title="AOD Value",
-                yaxis_title="Frequency",
-                height=500
-            )
-            return error_fig
+            import traceback
+            traceback.print_exc()
+            return (make_empty_fig(f"Error: {str(e)}"), empty_fig, single_style,
+                    hidden_style, '', header_hidden, '')
 
     # ---------------------------------------------------
     # POLARIZED REFLECTANCE CALLBACK #1 (5 of 18 total)
@@ -9195,6 +9373,59 @@ def run_app(initial_file_path, directory_path):
             return [], None
 
     # ---------------------------------------------------
+    # HISTOGRAM PROPERTY SELECTOR CALLBACKS
+    # ---------------------------------------------------
+    @app.callback(
+        [Output('hist-property-selector', 'options'),
+         Output('hist-property-selector', 'value')],
+        Input('file-selector', 'value'),
+        prevent_initial_call=True
+    )
+    def load_hist_property_options(file_path):
+        print("Doing callback: load_hist_property_options")
+        if file_path is None:
+            return [], None
+        try:
+            data_dict, sorted_variables, display_names, variable_metadata = load_retrieval_file(file_path)
+            options = create_dropdown_options(sorted_variables, display_names, variable_metadata)
+            default_var = None
+            for var in sorted_variables:
+                if 'optical_depth' in var and ('556' in var or '_556' in var) and 'fine' in var:
+                    default_var = var
+                    break
+            if default_var is None and sorted_variables:
+                default_var = sorted_variables[0]
+            return options, default_var
+        except Exception as e:
+            print(f"Error loading histogram File 1 properties from {file_path}: {e}")
+            return [], None
+
+    @app.callback(
+        [Output('hist-property-selector-2', 'options'),
+         Output('hist-property-selector-2', 'value')],
+        Input('individual-file-selector-2', 'value'),
+        prevent_initial_call=True
+    )
+    def load_hist_file2_property_options(file_path_2):
+        print("Doing callback: load_hist_file2_property_options")
+        if file_path_2 is None:
+            return [], None
+        try:
+            data_dict, sorted_variables, display_names, variable_metadata = load_retrieval_file(file_path_2)
+            options = create_dropdown_options(sorted_variables, display_names, variable_metadata)
+            default_var = None
+            for var in sorted_variables:
+                if 'optical_depth' in var and ('556' in var or '_556' in var) and 'fine' in var:
+                    default_var = var
+                    break
+            if default_var is None and sorted_variables:
+                default_var = sorted_variables[0]
+            return options, default_var
+        except Exception as e:
+            print(f"Error loading histogram File 2 properties from {file_path_2}: {e}")
+            return [], None
+
+    # ---------------------------------------------------
     # COST INCREMENT/DECREMENT CALLBACK
     # ---------------------------------------------------
     @app.callback(
@@ -9377,8 +9608,10 @@ def run_app(initial_file_path, directory_path):
         [Output('scatter-plot-single', 'figure'),
          Output('combined-plot', 'figure'),
          Output('scatter-polarized-plot-single', 'figure'),
+         Output('scatter-polar-plot-single', 'figure'),
          Output('combined-plot-container', 'style'),
          Output('scatter-polarized-container-single', 'style'),
+         Output('scatter-polar-container-single', 'style'),
          Output('clicked-point-store', 'data', allow_duplicate=True),
          Output('click-info', 'children'),
          Output('panel-properties-table', 'children'),
@@ -9417,14 +9650,14 @@ def run_app(initial_file_path, directory_path):
         if current_file_data is None:
             empty_fig = create_placeholder_figure("No file selected")
             hidden_style = {'display': 'none'}
-            return (empty_fig, empty_fig, empty_fig, hidden_style, hidden_style, None, "No file selected", "", hidden_style, "")
+            return (empty_fig, empty_fig, empty_fig, empty_fig, hidden_style, hidden_style, hidden_style, None, "No file selected", "", hidden_style, "")
 
         # Get current file path from store and read data
         file_path = current_file_data.get('file_path')
         if file_path is None:
             empty_fig = create_placeholder_figure("Please select a file to view data")
             hidden_style = {'display': 'none'}
-            return (empty_fig, empty_fig, empty_fig, hidden_style, hidden_style, None, "Please select a file", "", hidden_style, "")
+            return (empty_fig, empty_fig, empty_fig, empty_fig, hidden_style, hidden_style, hidden_style, None, "Please select a file", "", hidden_style, "")
 
         # Read data from cache NOT from current file path
         cached_data = get_cached_data(file_path)
@@ -9518,12 +9751,13 @@ def run_app(initial_file_path, directory_path):
         # Preserve the zoom when updating the figure with uirevision
         scatter_fig.update_layout(uirevision=uirevision_value)
 
-        # Create intensity/DoLP and polarized reflectance plots
+        # Create intensity/DoLP, polarized reflectance, and polar plots
         combined_fig = go.Figure()
         polarized_fig = go.Figure()
-        plots_hidden_style = {'display': 'none'}
-        combined_container_style = {'marginBottom': '120px', 'display': 'none'}
+        polar_fig = go.Figure()
+        combined_container_style  = {'marginBottom': '120px', 'display': 'none'}
         polarized_container_style = {'marginTop': '120px', 'marginBottom': '25px', 'display': 'none'}
+        polar_container_style     = {'marginTop': '40px', 'marginBottom': '25px', 'display': 'none'}
 
         if clicked_point_data is not None and 'row' in clicked_point_data:
             selected_row = clicked_point_data['row']
@@ -9533,7 +9767,7 @@ def run_app(initial_file_path, directory_path):
                 intensity_data, dolp_data, wavelengths = get_channel_intensity_dolp_vza(data_dict, selected_row, selected_col)
                 wl_colors = generate_wavelength_colors(wavelengths)
 
-                # Create combined plot with subplots
+                # Create combined intensity/DoLP plot
                 file_format = data_dict.get('file_format', 'HARP2')
                 combined_fig = create_combined_intensity_dolp_plot(
                     intensity_data, dolp_data, wavelengths, wl_colors, file_format, data_dict
@@ -9544,8 +9778,15 @@ def run_app(initial_file_path, directory_path):
                     intensity_data, dolp_data, wavelengths, wl_colors
                 )
 
-                combined_container_style = {'marginBottom': '20px', 'display': 'block'}
+                # Create polar plot
+                polar_fig = create_polar_angular_plot(
+                    intensity_data, dolp_data, wavelengths, wl_colors, 'intensity',
+                    os.path.basename(file_path)
+                )
+
+                combined_container_style  = {'marginBottom': '20px', 'display': 'block'}
                 polarized_container_style = {'marginTop': '20px', 'marginBottom': '25px', 'display': 'block'}
+                polar_container_style     = {'marginTop': '40px', 'marginBottom': '25px', 'display': 'block'}
 
             except Exception as e:
                 print(f"Error creating intensity/DoLP plots: {e}")
@@ -9636,8 +9877,8 @@ def run_app(initial_file_path, directory_path):
         # Create file header (file name only, no path)
         file_header = os.path.basename(file_path) if file_path else ""
 
-        return (scatter_fig, combined_fig, polarized_fig,
-                combined_container_style, polarized_container_style,
+        return (scatter_fig, combined_fig, polarized_fig, polar_fig,
+                combined_container_style, polarized_container_style, polar_container_style,
                 clicked_point_data, click_info, properties_table, panel_style, file_header)
 
     # ---------------------------------------------------

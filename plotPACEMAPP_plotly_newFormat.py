@@ -266,6 +266,23 @@ def extract_timestamp_from_filename(filepath):
     return "Cannot parse time/date from file name"
 
 
+def get_time_at_point(data_dict, row):
+    """
+    Return the rsp_time value at a given row index as a float, or None if unavailable.
+    RSP files store time as fractional UTC hours. PACE files have no rsp_time yet.
+    """
+    if 'rsp_time' not in data_dict:
+        return None
+    try:
+        time_data = data_dict['rsp_time']
+        if time_data.ndim > 1:
+            time_data = time_data.flatten()
+        t = float(time_data[row])
+        return t if np.isfinite(t) else None
+    except Exception:
+        return None
+
+
 def detect_file_format(file_path):
     """
     Detect whether the file is RSP or HARP2 format based on filename.
@@ -2953,11 +2970,18 @@ def create_scatter_plot_only(data_dict, selected_property, original_indices, cli
     color_flat = data_dict[selected_property].flatten()
     cost_flat = data_dict['cost_function'].flatten()
 
+    # Time: use rsp_time for RSP files; NaN for PACE (no reliable time variable yet)
+    if 'rsp_time' in data_dict:
+        time_flat = data_dict['rsp_time'].flatten()
+    else:
+        time_flat = np.full(len(lon_flat), np.nan)
+
     valid_mask = np.isfinite(lon_flat) & np.isfinite(lat_flat) & np.isfinite(color_flat)
     lon_valid = lon_flat[valid_mask]
     lat_valid = lat_flat[valid_mask]
     color_valid = color_flat[valid_mask]
     cost_valid = cost_flat[valid_mask]
+    time_valid = time_flat[valid_mask]
     original_indices_valid = original_indices[valid_mask]
 
     # Let's clean the colorbar label up some
@@ -3015,11 +3039,12 @@ def create_scatter_plot_only(data_dict, selected_property, original_indices, cli
             hovertemplate=(
                 'Lat: %{lat:.2f}<br>' +
                 'Lon: %{lon:.2f}<br>' +
+                'Time: %{customdata[1]:.3f} UTC<br>' +
                 f'{selected_property}: %{{marker.color:.3f}}<br>' +
                 'Cost: %{customdata[0]:.2f}' +
                 '<extra></extra>'
             ),
-            customdata=np.column_stack((cost_valid, original_indices_valid)),
+            customdata=np.column_stack((cost_valid, time_valid, original_indices_valid)),
             showlegend=False
         )
     )
@@ -3349,10 +3374,17 @@ def create_angular_scatter_plot(filtered_data, color_values, color_label, clicke
     lats = filtered_data['latitude'].flatten()
     lons = filtered_data['longitude'].flatten()
 
+    # Time: use rsp_time for RSP files; NaN for PACE (no reliable time variable yet)
+    if 'rsp_time' in filtered_data:
+        time_flat = filtered_data['rsp_time'].flatten()
+    else:
+        time_flat = np.full(len(lats), np.nan)
+
     valid = np.isfinite(lats) & np.isfinite(lons) & np.isfinite(color_values)
     plot_lats = lats[valid]
     plot_lons = lons[valid]
     plot_vals = color_values[valid]
+    time_valid = time_flat[valid]
 
     if len(plot_lats) == 0:
         return create_placeholder_figure("No valid data to display")
@@ -3386,8 +3418,9 @@ def create_angular_scatter_plot(filtered_data, color_values, color_label, clicke
             showscale=True
         ),
         hovertemplate=(f'Lat: %{{lat:.4f}}<br>Lon: %{{lon:.4f}}<br>'
+                       f'Time: %{{customdata:.3f}} UTC<br>'
                        f'{color_label}: %{{marker.color:.2f}}<extra></extra>'),
-        customdata=np.arange(len(lats))[valid],
+        customdata=time_valid,
         showlegend=False
     ))
 
@@ -4824,6 +4857,12 @@ def create_export_figure(data_dict, selected_property, original_indices,
     color_flat = data_dict[selected_property].flatten()
     cost_flat = data_dict['cost_function'].flatten()
 
+    # Time: use rsp_time for RSP files; NaN for PACE (no reliable time variable yet)
+    if 'rsp_time' in data_dict:
+        time_flat = data_dict['rsp_time'].flatten()
+    else:
+        time_flat = np.full(len(lon_flat), np.nan)
+
     if debug > 1:
         print("After flattening:")
         print(f"  lon_flat shape: {lon_flat.shape}")
@@ -4855,6 +4894,7 @@ def create_export_figure(data_dict, selected_property, original_indices,
     lat_valid = lat_flat[valid_mask]
     color_valid = color_flat[valid_mask]
     cost_valid = cost_flat[valid_mask]
+    time_valid = time_flat[valid_mask]
     original_indices_valid = original_indices[valid_mask]
 
     if debug > 1:
@@ -4904,12 +4944,14 @@ def create_export_figure(data_dict, selected_property, original_indices,
             hovertemplate=(
                 'Lat: %{lat:.2f}<br>' +
                 'Lon: %{lon:.2f}<br>' +
+                'Time: %{customdata[1]:.3f} UTC<br>' +
                 f'{selected_property}: %{{marker.color:.3f}}<br>' +
                 'Cost: %{customdata[0]:.2f}' +
                 '<extra></extra>'
             ),
             customdata=np.column_stack((
                 cost_valid,
+                time_valid,
                 original_indices_valid
             )),
             showlegend=False
@@ -7142,6 +7184,11 @@ def run_app(initial_file_path, directory_path):
                         properties_table_1 = create_properties_table_compact(filtered_data_1, file1_row, file1_col, selected_property)
                         properties_table_2 = create_properties_table_compact(filtered_data_2, file2_row, file2_col, selected_property_2)
 
+                        t1 = get_time_at_point(data_dict_1, file1_row)
+                        t1_str = f"{t1:.3f} UTC" if t1 is not None else "NaN"
+                        t2 = get_time_at_point(data_dict_2, file2_row)
+                        t2_str = f"{t2:.3f} UTC" if t2 is not None else "NaN"
+
                         # Build comparison info panel (3-column layout as before)
                         comparison_info = html.Div([
                             html.Div([
@@ -7155,7 +7202,7 @@ def run_app(initial_file_path, directory_path):
                                         'fontSize': '16px',
                                         'fontWeight': 'bold'
                                     }),
-                                    html.P(f"Location: ({click_lat:.4f}°, {click_lon:.4f}°)",
+                                    html.P([f"Location: ({click_lat:.4f}°, {click_lon:.4f}°)", html.Br(), f"Time: {t1_str}"],
                                            style={'fontSize': '12px',
                                                   'color': '#666',
                                                   'marginBottom': '10px',
@@ -7226,7 +7273,7 @@ def run_app(initial_file_path, directory_path):
                                         'fontSize': '16px',
                                         'fontWeight': 'bold'
                                     }),
-                                    html.P(f"Location: ({file2_actual_lat:.4f}°, {file2_actual_lon:.4f}°)",
+                                    html.P([f"Location: ({file2_actual_lat:.4f}°, {file2_actual_lon:.4f}°)", html.Br(), f"Time: {t2_str}"],
                                            style={'fontSize': '11px',
                                                   'color': '#666',
                                                   'marginBottom': '10px',
@@ -7316,6 +7363,10 @@ def run_app(initial_file_path, directory_path):
                         filename2 = os.path.basename(file_path_2)
                         properties_table_1 = create_properties_table_compact(filtered_data_1, file1_row, file1_col, selected_property)
                         properties_table_2 = create_properties_table_compact(filtered_data_2, file2_row, file2_col, selected_property_2)
+                        t1 = get_time_at_point(data_dict_1, file1_row)
+                        t1_str = f"{t1:.3f} UTC" if t1 is not None else "NaN"
+                        t2 = get_time_at_point(data_dict_2, file2_row)
+                        t2_str = f"{t2:.3f} UTC" if t2 is not None else "NaN"
                         comparison_info = html.Div([
                             html.Div([
                                 html.Div([
@@ -7323,7 +7374,7 @@ def run_app(initial_file_path, directory_path):
                                         'textAlign': 'center', 'marginTop': '5px', 'marginBottom': '5px',
                                         'color': '#2c3e50', 'fontSize': '16px', 'fontWeight': 'bold'
                                     }),
-                                    html.P(f"Location: ({click_lat:.4f}°, {click_lon:.4f}°)",
+                                    html.P([f"Location: ({click_lat:.4f}°, {click_lon:.4f}°)", html.Br(), f"Time: {t1_str}"],
                                            style={'fontSize': '12px', 'color': '#666',
                                                   'marginBottom': '10px', 'marginTop': '5px'}),
                                     properties_table_1
@@ -7351,7 +7402,7 @@ def run_app(initial_file_path, directory_path):
                                         'textAlign': 'center', 'marginTop': '5px', 'marginBottom': '5px',
                                         'color': '#2c3e50', 'fontSize': '16px', 'fontWeight': 'bold'
                                     }),
-                                    html.P(f"Location: ({float(file2_actual_lat):.4f}°, {float(file2_actual_lon):.4f}°)",
+                                    html.P([f"Location: ({float(file2_actual_lat):.4f}°, {float(file2_actual_lon):.4f}°)", html.Br(), f"Time: {t2_str}"],
                                            style={'fontSize': '11px', 'color': '#666',
                                                   'marginBottom': '10px', 'marginTop': '5px'}),
                                     properties_table_2
@@ -8034,7 +8085,13 @@ def run_app(initial_file_path, directory_path):
                 else:
                     lat = data_dict['latitude'][sel_row, sel_col]
                     lon = data_dict['longitude'][sel_row, sel_col]
-                click_info_single = f"Location: {lat:.4f}°N, {lon:.4f}°W"
+                time_val = get_time_at_point(data_dict, sel_row)
+                time_str = f"{time_val:.3f} UTC" if time_val is not None else "NaN"
+                click_info_single = html.Div([
+                    f"Location: {lat:.4f}°N, {lon:.4f}°W",
+                    html.Br(),
+                    f"Time: {time_str}"
+                ])
 
                 visible_style = {
                     'padding': '15px',
@@ -8205,7 +8262,13 @@ def run_app(initial_file_path, directory_path):
                 else:
                     lat1 = data_dict_1['latitude'][clicked_point_data_1['row'], clicked_point_data_1['col']]
                     lon1 = data_dict_1['longitude'][clicked_point_data_1['row'], clicked_point_data_1['col']]
-                click_info_1 = f"Location: {lat1:.4f}°N, {lon1:.4f}°W"
+                t1 = get_time_at_point(data_dict_1, clicked_point_data_1['row'])
+                t1_str = f"{t1:.3f} UTC" if t1 is not None else "NaN"
+                click_info_1 = html.Div([
+                    f"Location: {lat1:.4f}°N, {lon1:.4f}°W",
+                    html.Br(),
+                    f"Time: {t1_str}"
+                ])
 
             if file_path_2 and clicked_point_data_2:
                 properties_table_2 = create_properties_table_compact(
@@ -8218,7 +8281,13 @@ def run_app(initial_file_path, directory_path):
                 else:
                     lat2 = data_dict_2['latitude'][clicked_point_data_2['row'], clicked_point_data_2['col']]
                     lon2 = data_dict_2['longitude'][clicked_point_data_2['row'], clicked_point_data_2['col']]
-                click_info_2 = f"Location: {lat2:.4f}°N, {lon2:.4f}°W"
+                t2 = get_time_at_point(data_dict_2, clicked_point_data_2['row'])
+                t2_str = f"{t2:.3f} UTC" if t2 is not None else "NaN"
+                click_info_2 = html.Div([
+                    f"Location: {lat2:.4f}°N, {lon2:.4f}°W",
+                    html.Br(),
+                    f"Time: {t2_str}"
+                ])
 
             visible_style_multi = {
                 'padding': '15px',
@@ -9855,8 +9924,12 @@ def run_app(initial_file_path, directory_path):
                 raa_scalar = None
 
             # Build click info with conditional formatting
+            time_val = get_time_at_point(data_dict, selected_row)
+            time_str = f"{time_val:.3f} UTC" if time_val is not None else "NaN"
             click_info_parts = [
                 html.Strong("Location: "), f"Lat {lat:.4f}°, Lon {lon:.4f}°",
+                html.Br(),
+                html.Strong("Time: "), time_str,
                 html.Br()
             ]
 

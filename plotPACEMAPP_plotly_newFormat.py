@@ -1962,6 +1962,144 @@ def filter_by_cost(data_dict, max_cost=None):
     return filtered_dict, original_indices
 
 
+def filter_by_intensity_threshold(data_dict, wavelength_nm, min_pct_views, residual_threshold_pct):
+    """
+    Filter pixels based on intensity residual quality at a given wavelength.
+    For each pixel, computes the relative intensity residual across all views:
+        |measured - modeled| / measured * 100
+    Pixels where fewer than min_pct_views% of views have a residual below
+    residual_threshold_pct are set to infinity (filtered out).
+
+    Applied AFTER filter_by_cost. Only meaningful for RSP files (requires ymvec/fvec).
+    If min_pct_views <= 0 or required data is missing, returns data unchanged.
+
+    Args:
+        data_dict: filtered data dictionary (output of filter_by_cost)
+        wavelength_nm: wavelength to evaluate residuals at (e.g. 556)
+        min_pct_views: minimum percentage of views that must pass (e.g. 80.0)
+        residual_threshold_pct: relative residual threshold in percent (e.g. 5.0)
+
+    Returns:
+        filtered_dict (dict): same structure as input, failing pixels set to inf
+    """
+    # No filtering if threshold is effectively disabled
+    if min_pct_views <= 0:
+        return data_dict
+
+    # Requires RSP ymvec/fvec data
+    if 'ymvec' not in data_dict or 'fvec' not in data_dict:
+        return data_dict
+
+    ymvec = data_dict['ymvec']
+    fvec = data_dict['fvec']
+    original_shape = data_dict['original_shape']
+
+    # Build channel index ranges using same logic as get_channel_intensity_dolp_vza
+    file_format = data_dict.get('file_format', 'HARP2')
+    wavelength_mapping = get_wavelength_instrument_mapping(file_format, data_dict)
+    output_channels = data_dict.get('wavelengths', None)
+    channel_ranges, metadata = build_channel_ranges(wavelength_mapping, output_channels)
+    total_intensity_angles = metadata['total_intensity_angles']
+
+    wl_str = str(int(wavelength_nm))
+    if wl_str not in channel_ranges:
+        print(f"Warning: Wavelength {wl_str} nm not found in channel_ranges; skipping threshold filter.")
+        return data_dict
+
+    start_idx, end_idx = channel_ranges[wl_str]
+
+    # Extract intensity channels for all pixels at this wavelength
+    # RSP ymvec shape: (n_pixels, total_intensity + total_dolp)
+    # Intensity portion: first total_intensity_angles columns
+    if ymvec.ndim == 2 and len(original_shape) == 1:
+        ymvec_wl = ymvec[:, start_idx:end_idx].astype(float)   # (n_pixels, n_views)
+        fvec_wl = fvec[:, start_idx:end_idx].astype(float)
+    elif ymvec.ndim == 3 and len(original_shape) == 2:
+        n_views = end_idx - start_idx
+        ymvec_wl = ymvec[:, :, start_idx:end_idx].reshape(-1, n_views).astype(float)
+        fvec_wl = fvec[:, :, start_idx:end_idx].reshape(-1, n_views).astype(float)
+    else:
+        return data_dict
+
+    n_pixels = ymvec_wl.shape[0]
+
+    # Relative residual: |meas - mod| / |meas| * 100
+    with np.errstate(divide='ignore', invalid='ignore'):
+        rel_residuals = np.abs(ymvec_wl - fvec_wl) / np.abs(ymvec_wl) * 100.0
+
+    # A view is "valid" if both measured and modeled are finite and measured != 0
+    valid_views = (np.isfinite(ymvec_wl) & np.isfinite(fvec_wl) &
+                   (ymvec_wl != 0) & np.isfinite(rel_residuals))
+    passing_views = valid_views & (rel_residuals < residual_threshold_pct)
+
+    n_valid = valid_views.sum(axis=1).astype(float)   # (n_pixels,)
+    n_passing = passing_views.sum(axis=1).astype(float)
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        frac_passing = np.where(n_valid > 0, n_passing / n_valid * 100.0, 0.0)
+
+    # Pixels that fail: fewer than min_pct_views% of valid views pass
+    threshold_mask = frac_passing >= min_pct_views   # True = keep
+    threshold_mask = threshold_mask.reshape(original_shape)
+
+    if debug > 0:
+        kept = threshold_mask.sum()
+        total = threshold_mask.size
+        print(f"Intensity threshold filter ({wl_str} nm, ≥{min_pct_views}% views within {residual_threshold_pct}%): "
+              f"{kept}/{total} pixels kept")
+
+    # Apply mask to all arrays (same pattern as filter_by_cost)
+    filtered_dict = {}
+    for key, value in data_dict.items():
+        if key in ['file_path', 'original_shape', 'wavelengths', 'output_channels', 'available_modes']:
+            filtered_dict[key] = value
+        elif isinstance(value, np.ndarray):
+            if value.shape == original_shape:
+                filtered_value = value.copy().astype(float)
+                filtered_value[~threshold_mask] = np.inf
+                filtered_dict[key] = filtered_value
+            elif len(original_shape) == 2 and value.ndim == 3 and value.shape[:2] == original_shape:
+                filtered_value = value.copy().astype(float)
+                filtered_value[~threshold_mask, :] = np.inf
+                filtered_dict[key] = filtered_value
+            elif len(original_shape) == 1 and value.ndim == 2 and value.shape[0] == original_shape[0]:
+                filtered_value = value.copy().astype(float)
+                filtered_value[~threshold_mask, :] = np.inf
+                filtered_dict[key] = filtered_value
+            elif len(original_shape) == 1 and value.ndim == 3 and value.shape[0] == original_shape[0]:
+                filtered_value = value.copy().astype(float)
+                filtered_value[~threshold_mask, :, :] = np.inf
+                filtered_dict[key] = filtered_value
+            else:
+                filtered_dict[key] = value
+        else:
+            filtered_dict[key] = value
+
+    return filtered_dict
+
+
+def apply_threshold_if_needed(data_dict, threshold_params):
+    """
+    Apply intensity residual threshold filter if threshold_params is set and active.
+
+    Args:
+        data_dict: data dictionary (already cost-filtered)
+        threshold_params: dict with keys 'wavelength', 'min_pct_views',
+            'residual_threshold_pct'; or None to skip
+
+    Returns:
+        filtered_dict (dict): data_dict with threshold applied (or unchanged)
+    """
+    if threshold_params is None:
+        return data_dict
+    wl = threshold_params.get('wavelength')
+    min_pct = threshold_params.get('min_pct_views', 0)
+    res_pct = threshold_params.get('residual_threshold_pct', 1.0)
+    if wl is None or min_pct <= 0:
+        return data_dict
+    return filter_by_intensity_threshold(data_dict, wl, min_pct, res_pct)
+
+
 def get_channel_intensity_dolp_vza(data_dict, row_idx, col_idx):
     """
     Extract channel intensity, DoLP, and viewing zenith angle data for a
@@ -3988,7 +4126,7 @@ def create_residual_plot(data_dict, selected_row, selected_col, residual_type='b
         return fig
 
 
-def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode='total', title_suffix="", max_cost=None, highlight_time_index=None, highlight_y_value=None):
+def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode='total', title_suffix="", max_cost=None, highlight_time_index=None, highlight_y_value=None, threshold_params=None):
     """
     Create a plot showing any retrieval property vs time for airborne data (RSP).
     Shows all available wavelengths for the specified property-mode combination.
@@ -4024,14 +4162,22 @@ def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode=
         if time_data.ndim > 1:
             time_data = time_data.flatten()
 
+        # Apply intensity threshold filter first (RSP only; no-op for PACE or when inactive)
+        data_dict = apply_threshold_if_needed(data_dict, threshold_params)
+
         # Get cost function data for filtering
         cost_mask = None
         if max_cost is not None and 'cost_function' in data_dict:
             cost_data = data_dict['cost_function']
             if cost_data.ndim > 1:
                 cost_data = cost_data.flatten()
-            # Create mask: True for points that PASS the filter (cost <= threshold)
+            # Create mask: True for points that PASS both cost and threshold filters
             cost_mask = cost_data <= max_cost
+            # Also exclude pixels set to inf by threshold filter (latitude will be inf)
+            lat_data = data_dict.get('latitude', None)
+            if lat_data is not None:
+                lat_flat = lat_data.flatten() if lat_data.ndim > 1 else lat_data
+                cost_mask = cost_mask & np.isfinite(lat_flat)
 
         # Define property display names and units
         property_config = {
@@ -4604,16 +4750,18 @@ def create_polarized_reflectance_comparison_plot(intensity_data_1, dolp_data_1,
 
 
 def create_property_histogram(data_dict, selected_property, max_cost, n_bins=50,
-                              label=None, color='steelblue'):
+                              label=None, color='steelblue', threshold_params=None):
     """
     Create histogram of any retrieval property with cost filtering.
     label: trace name for legend; None hides legend
     color: bar color (e.g. 'steelblue' for File 1, 'firebrick' for File 2)
     n_bins: number of histogram bins (default 50)
+    threshold_params: dict for intensity residual threshold filter, or None
     """
 
-    # Filter data by cost function first
+    # Filter data by cost function, then apply intensity residual threshold
     filtered_data, original_indices = filter_by_cost(data_dict, max_cost)
+    filtered_data = apply_threshold_if_needed(filtered_data, threshold_params)
 
     # Get the data for the selected property
     prop_data = filtered_data[selected_property].flatten()
@@ -5621,6 +5769,8 @@ def run_app(initial_file_path, directory_path):
         dcc.Store(id='clicked-point-store'),
         dcc.Store(id='time-plot-clicked-point-store'),
         dcc.Store(id='applied-cost-value', data=default_cost_value),
+        dcc.Store(id='applied-threshold-value', data=None),
+        dcc.Store(id='applied-threshold-value-2', data=None),
 
         # Page header
         html.H1("PACE-MAPP Aerosol Properties Interactive Visualization",
@@ -5926,9 +6076,128 @@ def run_app(initial_file_path, directory_path):
                                         style={'width': '30%', 'padding': '8px', 'backgroundColor': '#27ae60',
                                                'color': 'white', 'border': 'none', 'borderRadius': '4px',
                                                'cursor': 'pointer'}),
-                        ], style={'display': 'flex', 'marginBottom': '30px', 'alignItems': 'center'}),
+                        ], style={'display': 'flex', 'marginBottom': '10px', 'alignItems': 'center'}),
                         html.Div(id='cost-input-message', style={'fontSize': '12px', 'color': '#7f8c8d'}),
                     ]),
+
+                    # Intensity Residual Threshold Filter (RSP only)
+                    html.Div([
+                        html.Label("Intensity Residual Filter (RSP Only):",
+                                   style={
+                                       'fontWeight': 'bold',
+                                       'marginBottom': '8px',
+                                       'marginTop': '2px',
+                                       'display': 'block',
+                                       'fontSize': '16px'
+                                   }),
+                        html.P("Filter pixels where fewer than the required % of views "
+                               "have |measured − modeled| / measured within the residual threshold.",
+                               style={'fontSize': '12px', 'color': '#7f8c8d', 'marginBottom': '8px'}),
+                        # File 1 threshold controls
+                        html.Div([
+                            html.Label("Wavelength:", style={'fontSize': '13px', 'marginBottom': '3px', 'display': 'block'}),
+                            dcc.Dropdown(
+                                id='threshold-wavelength-selector',
+                                options=[],
+                                value=None,
+                                placeholder="Select wavelength",
+                                clearable=False,
+                                style={'marginBottom': '8px', 'fontSize': '13px'}
+                            ),
+                            html.Div([
+                                html.Div([
+                                    html.Label("Min. Views Within Threshold (%):",
+                                               style={'fontSize': '13px', 'marginBottom': '3px', 'display': 'block'}),
+                                    dcc.Input(
+                                        id='threshold-pct-views',
+                                        type='number',
+                                        value=0,
+                                        min=0,
+                                        max=100,
+                                        step=1,
+                                        style={'width': '80px', 'fontSize': '13px', 'textAlign': 'center'}
+                                    ),
+                                ], style={'marginRight': '15px'}),
+                                html.Div([
+                                    html.Label("Residual Threshold (%):",
+                                               style={'fontSize': '13px', 'marginBottom': '3px', 'display': 'block'}),
+                                    dcc.Input(
+                                        id='threshold-residual-pct',
+                                        type='number',
+                                        value=1.0,
+                                        min=0,
+                                        step=0.1,
+                                        style={'width': '80px', 'fontSize': '13px', 'textAlign': 'center'}
+                                    ),
+                                ]),
+                            ], style={'display': 'flex', 'alignItems': 'flex-start', 'marginBottom': '8px'}),
+                            html.Button('Apply Threshold', id='apply-threshold-button', n_clicks=0,
+                                        style={'width': '100%', 'padding': '8px', 'backgroundColor': '#2980b9',
+                                               'color': 'white', 'border': 'none', 'borderRadius': '4px',
+                                               'cursor': 'pointer', 'marginBottom': '5px'}),
+                            html.Div(id='threshold-message',
+                                     style={'fontSize': '12px', 'color': '#7f8c8d', 'marginBottom': '8px'}),
+                        ]),
+                        # File 2 threshold controls (Compare Files + RSP file 2 only)
+                        html.Div([
+                            html.Hr(style={'borderColor': '#bdc3c7', 'margin': '8px 0'}),
+                            html.Label("File 2 – Intensity Residual Filter:",
+                                       style={'fontSize': '13px', 'fontWeight': 'bold',
+                                              'marginBottom': '5px', 'display': 'block'}),
+                            dcc.Dropdown(
+                                id='threshold-wavelength-selector-2',
+                                options=[],
+                                value=None,
+                                placeholder="Select wavelength",
+                                clearable=False,
+                                style={'marginBottom': '8px', 'fontSize': '13px'}
+                            ),
+                            html.Div([
+                                html.Div([
+                                    html.Label("Min. Views Within Threshold (%):",
+                                               style={'fontSize': '13px', 'marginBottom': '3px', 'display': 'block'}),
+                                    dcc.Input(
+                                        id='threshold-pct-views-2',
+                                        type='number',
+                                        value=0,
+                                        min=0,
+                                        max=100,
+                                        step=1,
+                                        style={'width': '80px', 'fontSize': '13px', 'textAlign': 'center'}
+                                    ),
+                                ], style={'marginRight': '15px'}),
+                                html.Div([
+                                    html.Label("Residual Threshold (%):",
+                                               style={'fontSize': '13px', 'marginBottom': '3px', 'display': 'block'}),
+                                    dcc.Input(
+                                        id='threshold-residual-pct-2',
+                                        type='number',
+                                        value=1.0,
+                                        min=0,
+                                        step=0.1,
+                                        style={'width': '80px', 'fontSize': '13px', 'textAlign': 'center'}
+                                    ),
+                                ]),
+                            ], style={'display': 'flex', 'alignItems': 'flex-start', 'marginBottom': '8px'}),
+                            html.Button('Apply Threshold (File 2)', id='apply-threshold-button-2', n_clicks=0,
+                                        style={'width': '100%', 'padding': '8px', 'backgroundColor': '#8e44ad',
+                                               'color': 'white', 'border': 'none', 'borderRadius': '4px',
+                                               'cursor': 'pointer', 'marginBottom': '5px'}),
+                            html.Div(id='threshold-message-2',
+                                     style={'fontSize': '12px', 'color': '#7f8c8d', 'marginBottom': '4px'}),
+                        ], id='threshold-file-2-section', style={'display': 'none'}),
+                    ], id='threshold-filter-container',
+                       style={'display': 'none', 'marginBottom': '6px',
+                              'padding': '10px', 'backgroundColor': '#eaf4fb',
+                              'borderRadius': '6px', 'border': '1px solid #aed6f1'}),
+
+                    # Filter stats — shown below the threshold box for all files/modes
+                    html.Div(id='filter-stats-display',
+                             style={'fontSize': '12px', 'color': '#555',
+                                    'marginBottom': '4px', 'marginTop': '2px'}),
+                    html.Div(id='filter-stats-display-2',
+                             style={'fontSize': '12px', 'color': '#555',
+                                    'marginBottom': '18px', 'marginTop': '2px'}),
 
                     # Lat/Lon inputs
                     html.Div([
@@ -6201,8 +6470,8 @@ def run_app(initial_file_path, directory_path):
                             'border': '1px solid #bdc3c7',
                             'borderRadius': '5px',
                             'backgroundColor': '#ffffff',
-                            'marginTop': '20px',
-                            'marginBottom': '25px',
+                            'marginTop': '10px',
+                            'marginBottom': '15px',
                             'display': 'none'  # Hidden until point clicked
                         }),
 
@@ -6969,6 +7238,8 @@ def run_app(initial_file_path, directory_path):
          Input('property-selector', 'value'),
          Input('property-selector-2', 'value'),
          Input('applied-cost-value', 'data'),
+         Input('applied-threshold-value', 'data'),
+         Input('applied-threshold-value-2', 'data'),
          # Input('multi-file-clicked-point', 'data')],
          Input('scatter-plot-1', 'clickData'),
          Input('find-point-button', 'n_clicks')],
@@ -6977,7 +7248,8 @@ def run_app(initial_file_path, directory_path):
         prevent_initial_call=True
     )
     def update_scatter_multi(analysis_mode, file_path_1, file_path_2, selected_property, selected_property_2,
-                             max_cost, clickData, find_button_clicks, input_lat, input_lon):
+                             max_cost, threshold_params, threshold_params_2,
+                             clickData, find_button_clicks, input_lat, input_lon):
         from dash import callback_context
         print("Doing callback: update_scatter_multi")
 
@@ -7052,9 +7324,11 @@ def run_app(initial_file_path, directory_path):
             data_dict_1 = cached_data_1['data_dict']
             data_dict_2 = cached_data_2['data_dict']
 
-            # Filter data by cost for both files
+            # Filter data by cost then intensity threshold for both files
             filtered_data_1, original_indices_1 = filter_by_cost(data_dict_1, max_cost)
+            filtered_data_1 = apply_threshold_if_needed(filtered_data_1, threshold_params)
             filtered_data_2, original_indices_2 = filter_by_cost(data_dict_2, max_cost)
+            filtered_data_2 = apply_threshold_if_needed(filtered_data_2, threshold_params_2)
 
             # Initialize click-related variables
             clicked_data_1 = None
@@ -7512,13 +7786,16 @@ def run_app(initial_file_path, directory_path):
          Input('individual-file-selector-2', 'value'),
          Input('property-selector', 'value'),
          Input('applied-cost-value', 'data'),
+         Input('applied-threshold-value', 'data'),
+         Input('applied-threshold-value-2', 'data'),
          Input('plot-type-selector', 'value'),
          Input('property-index-plot-rsp', 'clickData')],
         prevent_initial_call=True
     )
     def update_image_swath_comparison(analysis_mode, file_path_1, file_path_2,
-                                      selected_property, max_cost, plot_type,
-                                      clickData):
+                                      selected_property, max_cost,
+                                      threshold_params, threshold_params_2,
+                                      plot_type, clickData):
         """
         Main callback for Image/Swath Comparison mode.
         Matches RSP swath points to PACE image pixels and displays comparison.
@@ -7606,8 +7883,13 @@ def run_app(initial_file_path, directory_path):
                 ])
                 return (error_msg,) + default_returns[1:]
 
-            # Filter both datasets by cost independently
-            rsp_cost_mask = rsp_data_full['cost_function'].flatten() <= max_cost
+            # Apply intensity threshold filter to RSP data (if set)
+            rsp_threshold_params = threshold_params if file_types['rsp_file'] == 1 else threshold_params_2
+            rsp_data_thresholded = apply_threshold_if_needed(rsp_data_full, rsp_threshold_params)
+
+            # Filter both datasets by cost independently; combine with threshold for RSP
+            rsp_cost_mask = ((rsp_data_full['cost_function'].flatten() <= max_cost) &
+                             np.isfinite(rsp_data_thresholded['latitude'].flatten()))
             pace_cost_mask = pace_data_full['cost_function'].flatten() <= max_cost
 
             # Get original shapes for reshaping
@@ -7921,6 +8203,8 @@ def run_app(initial_file_path, directory_path):
          Input('file-selector', 'value'),
          Input('individual-file-selector-2', 'value'),
          Input('applied-cost-value', 'data'),
+         Input('applied-threshold-value', 'data'),
+         Input('applied-threshold-value-2', 'data'),
          Input('plot-type-selector', 'value'),
          Input('angular-x-axis-selector', 'value'),
          Input('angular-scatter-plot-1', 'clickData'),
@@ -7931,7 +8215,8 @@ def run_app(initial_file_path, directory_path):
         prevent_initial_call=True
     )
     def update_solar_geometry(analysis_mode, file_path_1, file_path_2,
-                              max_cost, plot_type, x_axis_type,
+                              max_cost, threshold_params, threshold_params_2,
+                              plot_type, x_axis_type,
                               click_multi, click_single, find_button_clicks,
                               input_lat, input_lon):
         """
@@ -8001,6 +8286,7 @@ def run_app(initial_file_path, directory_path):
                 cached = get_cached_data(file_path_1)
                 data_dict = cached['data_dict']
                 filtered_data, original_indices = filter_by_cost(data_dict, max_cost)
+                filtered_data = apply_threshold_if_needed(filtered_data, threshold_params)
 
                 # Compute angular color values for scatter map
                 color_values, color_label = compute_scattering_angle_values(filtered_data, x_axis_type)
@@ -8134,6 +8420,7 @@ def run_app(initial_file_path, directory_path):
                 cached_1 = get_cached_data(file_path_1)
                 data_dict_1 = cached_1['data_dict']
                 filtered_1, _ = filter_by_cost(data_dict_1, max_cost)
+                filtered_1 = apply_threshold_if_needed(filtered_1, threshold_params)
                 color_values_1, color_label_1 = compute_scattering_angle_values(filtered_1, x_axis_type)
 
                 # Determine clicked point from File 1: map click or Enter Coordinates
@@ -8183,6 +8470,7 @@ def run_app(initial_file_path, directory_path):
                 cached_2 = get_cached_data(file_path_2)
                 data_dict_2 = cached_2['data_dict']
                 filtered_2, _ = filter_by_cost(data_dict_2, max_cost)
+                filtered_2 = apply_threshold_if_needed(filtered_2, threshold_params_2)
                 color_values_2, color_label_2 = compute_scattering_angle_values(filtered_2, x_axis_type)
 
                 # Find nearest point in File 2 to the clicked File 1 point
@@ -8475,10 +8763,13 @@ def run_app(initial_file_path, directory_path):
          Input('plot-type-selector', 'value'),
          Input('property-time-selector', 'value'),
          Input('applied-cost-value', 'data'),
+         Input('applied-threshold-value', 'data'),
+         Input('applied-threshold-value-2', 'data'),
          Input('time-plot-clicked-point-store', 'data')],
         prevent_initial_call=True
     )
-    def update_aod_time_plots(file_path_1, file_path_2, analysis_mode, active_tab, selected_property, max_cost, clicked_point_data):
+    def update_aod_time_plots(file_path_1, file_path_2, analysis_mode, active_tab, selected_property,
+                              max_cost, threshold_params, threshold_params_2, clicked_point_data):
         print(f"Doing callback: update_aod_time_plots with property={selected_property}")
         """
         Callback for Property vs Time plot for airborne/RSP data.
@@ -8554,7 +8845,7 @@ def run_app(initial_file_path, directory_path):
                     # Only highlight if this plot was clicked
                     highlight_idx_1 = highlight_time_index if (clicked_point_data and clicked_point_data.get('source_plot') == 'plot-1') else None
                     highlight_y_1 = highlight_y_value if (clicked_point_data and clicked_point_data.get('source_plot') == 'plot-1') else None
-                    fig1 = create_property_vs_time_plot(data_dict_1, property_name=property_name, mode=mode, title_suffix=f"File 1: {filename1}", max_cost=max_cost, highlight_time_index=highlight_idx_1, highlight_y_value=highlight_y_1)
+                    fig1 = create_property_vs_time_plot(data_dict_1, property_name=property_name, mode=mode, title_suffix=f"File 1: {filename1}", max_cost=max_cost, highlight_time_index=highlight_idx_1, highlight_y_value=highlight_y_1, threshold_params=threshold_params)
                 else:
                     fig1 = go.Figure()
                     fig1.add_annotation(
@@ -8585,7 +8876,7 @@ def run_app(initial_file_path, directory_path):
                     # Only highlight if this plot was clicked
                     highlight_idx_2 = highlight_time_index if (clicked_point_data and clicked_point_data.get('source_plot') == 'plot-2') else None
                     highlight_y_2 = highlight_y_value if (clicked_point_data and clicked_point_data.get('source_plot') == 'plot-2') else None
-                    fig2 = create_property_vs_time_plot(data_dict_2, property_name=property_name, mode=mode, title_suffix=f"File 2: {filename2}", max_cost=max_cost, highlight_time_index=highlight_idx_2, highlight_y_value=highlight_y_2)
+                    fig2 = create_property_vs_time_plot(data_dict_2, property_name=property_name, mode=mode, title_suffix=f"File 2: {filename2}", max_cost=max_cost, highlight_time_index=highlight_idx_2, highlight_y_value=highlight_y_2, threshold_params=threshold_params_2)
                 else:
                     fig2 = go.Figure()
                     fig2.add_annotation(
@@ -8696,7 +8987,7 @@ def run_app(initial_file_path, directory_path):
                 )
 
             # Create the property vs time plot
-            single_fig = create_property_vs_time_plot(data_dict, property_name=property_name, mode=mode, max_cost=max_cost, highlight_time_index=highlight_time_index, highlight_y_value=highlight_y_value)
+            single_fig = create_property_vs_time_plot(data_dict, property_name=property_name, mode=mode, max_cost=max_cost, highlight_time_index=highlight_time_index, highlight_y_value=highlight_y_value, threshold_params=threshold_params)
             return (
                 {'display': 'block'},
                 {'display': 'none'},
@@ -8919,13 +9210,16 @@ def run_app(initial_file_path, directory_path):
        Input('hist-bin-count', 'value'),
        Input('hist-bin-count-2', 'value'),
        Input('applied-cost-value', 'data'),
+       Input('applied-threshold-value', 'data'),
+       Input('applied-threshold-value-2', 'data'),
        Input('current-file-data', 'data'),
        Input('individual-analysis-mode', 'value')],
       [State('individual-file-selector-2', 'value')],
       prevent_initial_call=True
       )
     def update_histogram(selected_property, selected_property_2, n_bins, n_bins_2,
-                         max_cost, current_file_data, analysis_mode, file_path_2):
+                         max_cost, threshold_params, threshold_params_2,
+                         current_file_data, analysis_mode, file_path_2):
         """
         Update histogram based on selected property, bin count, and cost threshold.
         Supports both Single File and Compare Files modes.
@@ -8987,11 +9281,11 @@ def run_app(initial_file_path, directory_path):
 
                 fig1 = create_property_histogram(
                     data_dict_1, selected_property, max_cost,
-                    n_bins=n_bins, color='steelblue'
+                    n_bins=n_bins, color='steelblue', threshold_params=threshold_params
                 )
                 fig2 = create_property_histogram(
                     data_dict_2, selected_property_2, max_cost,
-                    n_bins=n_bins_2, color='firebrick'
+                    n_bins=n_bins_2, color='firebrick', threshold_params=threshold_params_2
                 )
 
                 header_1 = os.path.basename(file_path_1)
@@ -9003,7 +9297,8 @@ def run_app(initial_file_path, directory_path):
             else:
                 # --- Single File mode ---
                 fig1 = create_property_histogram(
-                    data_dict_1, selected_property, max_cost, n_bins=n_bins
+                    data_dict_1, selected_property, max_cost, n_bins=n_bins,
+                    threshold_params=threshold_params
                 )
                 return (fig1, empty_fig, single_style, hidden_style,
                         '', header_hidden, '')
@@ -9382,10 +9677,14 @@ def run_app(initial_file_path, directory_path):
                 new_default_var = new_sorted_variables[0]
 
             # Update current file data store
+            new_is_rsp = 'rsp_time' in new_data_dict
+            new_wavelengths = [int(w) for w in new_data_dict['wavelengths'].tolist()] if 'wavelengths' in new_data_dict else []
             new_file_data = {
                 'file_path': selected_file_path,
                 'max_cost_value': float(new_max_cost_value),
-                'default_var': new_default_var
+                'default_var': new_default_var,
+                'is_rsp': new_is_rsp,
+                'wavelengths': new_wavelengths
             }
 
             # Reset clicked point data when changing files
@@ -9600,6 +9899,189 @@ def run_app(initial_file_path, directory_path):
         # Valid input - use it
         return input_value, f"Using cost threshold: {input_value:.3f}", input_value
 
+    # ---------------------------------------------------
+    # INTENSITY RESIDUAL THRESHOLD CALLBACKS
+    # ---------------------------------------------------
+
+    @app.callback(
+        [Output('threshold-wavelength-selector', 'options'),
+         Output('threshold-wavelength-selector', 'value'),
+         Output('threshold-filter-container', 'style'),
+         Output('applied-threshold-value', 'data', allow_duplicate=True)],
+        [Input('current-file-data', 'data')],
+        prevent_initial_call=True
+    )
+    def populate_threshold_controls(current_file_data):
+        """Show threshold filter and populate wavelengths when an RSP file is loaded."""
+        print("Doing callback: populate_threshold_controls")
+        hidden = {'display': 'none'}
+        visible = {'display': 'block', 'marginBottom': '20px', 'padding': '10px',
+                   'backgroundColor': '#eaf4fb', 'borderRadius': '6px', 'border': '1px solid #aed6f1'}
+        if not current_file_data or not current_file_data.get('is_rsp', False):
+            return [], None, hidden, None
+        wavelengths = current_file_data.get('wavelengths', [])
+        options = [{'label': f'{int(w)} nm', 'value': int(w)} for w in wavelengths]
+        wl_values = [int(w) for w in wavelengths]
+        default_wl = 556 if 556 in wl_values else (wl_values[0] if wl_values else None)
+        return options, default_wl, visible, None
+
+    @app.callback(
+        [Output('threshold-wavelength-selector-2', 'options'),
+         Output('threshold-wavelength-selector-2', 'value'),
+         Output('threshold-file-2-section', 'style'),
+         Output('applied-threshold-value-2', 'data', allow_duplicate=True)],
+        [Input('individual-file-selector-2', 'value'),
+         Input('individual-analysis-mode', 'value')],
+        prevent_initial_call=True
+    )
+    def populate_threshold_controls_2(file_path_2, analysis_mode):
+        """Show file-2 threshold controls when Compare Files mode has an RSP file 2."""
+        print("Doing callback: populate_threshold_controls_2")
+        hidden = {'display': 'none'}
+        visible = {'display': 'block'}
+        if not file_path_2 or analysis_mode != 'multiple':
+            return [], None, hidden, None
+        try:
+            data_dict_2, _, _, _ = load_retrieval_file(file_path_2)
+        except Exception:
+            return [], None, hidden, None
+        if 'rsp_time' not in data_dict_2:
+            return [], None, hidden, None
+        wavelengths = data_dict_2.get('wavelengths', [])
+        options = [{'label': f'{int(w)} nm', 'value': int(w)} for w in wavelengths]
+        wl_values = [int(w) for w in wavelengths]
+        default_wl = 556 if 556 in wl_values else (wl_values[0] if wl_values else None)
+        return options, default_wl, visible, None
+
+    @app.callback(
+        [Output('applied-threshold-value', 'data'),
+         Output('threshold-message', 'children')],
+        [Input('apply-threshold-button', 'n_clicks')],
+        [State('threshold-wavelength-selector', 'value'),
+         State('threshold-pct-views', 'value'),
+         State('threshold-residual-pct', 'value')],
+        prevent_initial_call=True
+    )
+    def apply_threshold_filter(n_clicks, wavelength, pct_views, residual_pct):
+        """Validate and store threshold filter parameters on Apply click."""
+        print("Doing callback: apply_threshold_filter")
+        if not n_clicks:
+            from dash import no_update
+            return no_update, no_update
+        if wavelength is None:
+            return None, "Please select a wavelength."
+        pct_views = float(pct_views) if pct_views is not None else 0.0
+        residual_pct = float(residual_pct) if residual_pct is not None else 1.0
+        pct_views = max(0.0, min(100.0, pct_views))
+        residual_pct = max(0.0, residual_pct)
+        if pct_views <= 0:
+            return None, "Min. Views = 0%: no threshold filtering applied."
+        params = {'wavelength': int(wavelength), 'min_pct_views': pct_views,
+                  'residual_threshold_pct': residual_pct}
+        return params, (f"Threshold active: {int(wavelength)} nm, ≥{pct_views:.0f}% views "
+                        f"within {residual_pct:.1f}%.")
+
+    @app.callback(
+        [Output('applied-threshold-value-2', 'data'),
+         Output('threshold-message-2', 'children')],
+        [Input('apply-threshold-button-2', 'n_clicks')],
+        [State('threshold-wavelength-selector-2', 'value'),
+         State('threshold-pct-views-2', 'value'),
+         State('threshold-residual-pct-2', 'value')],
+        prevent_initial_call=True
+    )
+    def apply_threshold_filter_2(n_clicks, wavelength, pct_views, residual_pct):
+        """Validate and store threshold filter parameters for file 2."""
+        print("Doing callback: apply_threshold_filter_2")
+        if not n_clicks:
+            from dash import no_update
+            return no_update, no_update
+        if wavelength is None:
+            return None, "Please select a wavelength."
+        pct_views = float(pct_views) if pct_views is not None else 0.0
+        residual_pct = float(residual_pct) if residual_pct is not None else 1.0
+        pct_views = max(0.0, min(100.0, pct_views))
+        residual_pct = max(0.0, residual_pct)
+        if pct_views <= 0:
+            return None, "Min. Views = 0%: no threshold filtering applied."
+        params = {'wavelength': int(wavelength), 'min_pct_views': pct_views,
+                  'residual_threshold_pct': residual_pct}
+        return params, (f"Threshold active: {int(wavelength)} nm, ≥{pct_views:.0f}% views "
+                        f"within {residual_pct:.1f}%.")
+
+    # ---------------------------------------------------
+    # FILTER STATISTICS DISPLAY CALLBACKS
+    # ---------------------------------------------------
+
+    def _compute_filter_stats(file_path, max_cost, threshold_params):
+        """
+        Compute N_total, N_after_cost, and N_after_threshold for a file.
+        Returns a formatted html.Div, or "" if data cannot be loaded.
+        """
+        if not file_path:
+            return ""
+        try:
+            data_dict = get_cached_data(file_path)['data_dict']
+        except Exception:
+            return ""
+
+        original_shape = data_dict.get('original_shape', (0,))
+        n_total = int(np.prod(original_shape))
+
+        # N after cost filter
+        cost_arr = data_dict['cost_function'].flatten()
+        if max_cost is not None:
+            n_cost = int((~np.isnan(cost_arr) & (cost_arr <= max_cost)).sum())
+        else:
+            n_cost = int(np.isfinite(cost_arr).sum())
+
+        # N after threshold (only meaningful for RSP files with active threshold)
+        n_thresh = None
+        if threshold_params and threshold_params.get('min_pct_views', 0) > 0:
+            filtered, _ = filter_by_cost(data_dict, max_cost)
+            filtered_thresh = apply_threshold_if_needed(filtered, threshold_params)
+            lat_flat = filtered_thresh['latitude'].flatten()
+            n_thresh = int(np.isfinite(lat_flat).sum())
+
+        # Build compact display string
+        parts = [
+            html.Span(f"N total: {n_total:,}", style={'marginRight': '8px'}),
+            html.Span("→", style={'marginRight': '8px', 'color': '#aaa'}),
+            html.Span(f"after cost: {n_cost:,}", style={'marginRight': '8px'}),
+        ]
+        if n_thresh is not None:
+            parts += [
+                html.Span("→", style={'marginRight': '8px', 'color': '#aaa'}),
+                html.Span(f"after threshold: {n_thresh:,}"),
+            ]
+        return html.Div(parts, style={'whiteSpace': 'nowrap', 'overflow': 'hidden',
+                                      'textOverflow': 'ellipsis'})
+
+    @app.callback(
+        Output('filter-stats-display', 'children'),
+        [Input('applied-cost-value', 'data'),
+         Input('applied-threshold-value', 'data'),
+         Input('current-file-data', 'data')],
+        prevent_initial_call=True
+    )
+    def update_filter_stats(max_cost, threshold_params, current_file_data):
+        """Show N_total / N_after_cost / N_after_threshold for file 1."""
+        print("Doing callback: update_filter_stats")
+        file_path = (current_file_data or {}).get('file_path')
+        return _compute_filter_stats(file_path, max_cost, threshold_params)
+
+    @app.callback(
+        Output('filter-stats-display-2', 'children'),
+        [Input('applied-cost-value', 'data'),
+         Input('applied-threshold-value-2', 'data')],
+        [State('individual-file-selector-2', 'value')],
+        prevent_initial_call=True
+    )
+    def update_filter_stats_2(max_cost, threshold_params_2, file_path_2):
+        """Show N_total / N_after_cost / N_after_threshold for file 2."""
+        print("Doing callback: update_filter_stats_2")
+        return _compute_filter_stats(file_path_2, max_cost, threshold_params_2)
+
     # 3. UI SYNCHRONIZATION CALLBACKS
     # ---------------------------------------------------
     # LAT-LON INPUT CALLBACK (14 of 18 total)
@@ -9694,6 +10176,7 @@ def run_app(initial_file_path, directory_path):
         [Input('property-selector', 'value'),
          # Input('cost-input', 'value'),
          Input('applied-cost-value', 'data'),
+         Input('applied-threshold-value', 'data'),
          Input('scatter-plot-single', 'clickData'),
          Input('find-point-button', 'n_clicks'),
          Input('current-file-data', 'data')],
@@ -9704,7 +10187,7 @@ def run_app(initial_file_path, directory_path):
         # prevent_initial_call='initial_duplicate'
         prevent_initial_call=True
     )
-    def update_scatter_single(selected_property, max_cost, clickData, find_button_clicks,
+    def update_scatter_single(selected_property, max_cost, threshold_params, clickData, find_button_clicks,
                               current_file_data, input_lat, input_lon, stored_point_data, plot_type):
         print("Doing callback: update_scatter_single")
 
@@ -9741,8 +10224,9 @@ def run_app(initial_file_path, directory_path):
 
         original_shape = data_dict['original_shape']
 
-        # Filter data by cost function
+        # Filter data by cost function, then apply intensity residual threshold
         filtered_data, original_indices = filter_by_cost(data_dict, max_cost)
+        filtered_data = apply_threshold_if_needed(filtered_data, threshold_params)
 
         # Handle point selection (same logic as before)
         clicked_point_data = None

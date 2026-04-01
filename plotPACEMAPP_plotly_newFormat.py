@@ -18,6 +18,7 @@ debug = 1
 verbose = 1
 default_cost = 0.5
 _data_cache = {}
+_hsrl_cache = {}
 
 
 # =============================================================================
@@ -55,6 +56,27 @@ def clear_data_cache():
     """
     global _data_cache
     _data_cache.clear()
+
+
+def read_hsrl_file(file_path):
+    """Read 5 variables from HSRL2 HDF5; cache result. Returns None on failure."""
+    global _hsrl_cache
+    if file_path in _hsrl_cache:
+        return _hsrl_cache[file_path]
+    try:
+        with h5py.File(file_path, 'r') as f:
+            result = {
+                'time':    f['/Nav_Data/gps_time'][:].squeeze().astype(np.float64),
+                'lat':     f['/Nav_Data/gps_lat'][:].squeeze().astype(np.float64),
+                'lon':     f['/Nav_Data/gps_lon'][:].squeeze().astype(np.float64),
+                'aod_532': f['/DataProducts/532_AOT_hi'][:].squeeze().astype(np.float64),
+                'aod_355': f['/DataProducts/355_AOT_hi'][:].squeeze().astype(np.float64),
+            }
+        _hsrl_cache[file_path] = result
+        return result
+    except Exception as e:
+        print(f"Warning: Could not read HSRL file {file_path}: {e}")
+        return None
 
 
 def scan_directory_for_files(directory_path):
@@ -4126,7 +4148,7 @@ def create_residual_plot(data_dict, selected_row, selected_col, residual_type='b
         return fig
 
 
-def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode='total', title_suffix="", max_cost=None, highlight_time_index=None, highlight_y_value=None, threshold_params=None):
+def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode='total', title_suffix="", max_cost=None, highlight_time_index=None, highlight_y_value=None, threshold_params=None, hsrl_data=None):
     """
     Create a plot showing any retrieval property vs time for airborne data (RSP).
     Shows all available wavelengths for the specified property-mode combination.
@@ -4161,6 +4183,12 @@ def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode=
         time_data = data_dict['rsp_time']
         if time_data.ndim > 1:
             time_data = time_data.flatten()
+
+        # Get lat/lon for hover info
+        lat_data_raw = data_dict.get('latitude')
+        lon_data_raw = data_dict.get('longitude')
+        lat_arr = lat_data_raw.flatten() if lat_data_raw is not None and lat_data_raw.ndim > 1 else lat_data_raw
+        lon_arr = lon_data_raw.flatten() if lon_data_raw is not None and lon_data_raw.ndim > 1 else lon_data_raw
 
         # Apply intensity threshold filter first (RSP only; no-op for PACE or when inactive)
         data_dict = apply_threshold_if_needed(data_dict, threshold_params)
@@ -4244,6 +4272,13 @@ def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode=
             wavelengths = [wl for wl, _ in wavelength_mapping]
             wl_colors = generate_wavelength_colors(wavelengths)
 
+            # Determine if HSRL overlay is active
+            show_hsrl = (
+                hsrl_data is not None
+                and property_name == 'optical_depth'
+                and mode == 'total'
+            )
+
             # Plot each wavelength
             for wl, var_name in wavelength_mapping:
                 property_data = data_dict.get(var_name)
@@ -4276,7 +4311,20 @@ def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode=
                 any_valid_data = True
 
                 # Convert to list of lists for JSON serialization
-                customdata_list = [[int(idx)] for idx in original_indices]
+                # customdata: [original_index, lat, lon]  (index at [0] used by click handler)
+                if lat_arr is not None and lon_arr is not None:
+                    lat_subset = lat_arr[:min_len]
+                    lon_subset = lon_arr[:min_len]
+                    customdata_list = [[int(idx), float(lat_subset[idx]) if np.isfinite(lat_subset[idx]) else None,
+                                        float(lon_subset[idx]) if np.isfinite(lon_subset[idx]) else None]
+                                       for idx in original_indices]
+                else:
+                    customdata_list = [[int(idx), None, None] for idx in original_indices]
+
+                # Determine visibility: when HSRL overlay is active, show only 532 nm RSP by default
+                rsp_visible = True
+                if show_hsrl:
+                    rsp_visible = True if abs(int(wl) - 532) < 5 else 'legendonly'
 
                 # Add trace
                 fig.add_trace(go.Scatter(
@@ -4285,12 +4333,45 @@ def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode=
                     # mode='lines+markers',
                     mode='markers',
                     name=f'{int(wl)} nm',
+                    visible=rsp_visible,
                     line=dict(color=wl_colors.get(wl, '#000000'), width=2),
                     marker=dict(size=8),
                     connectgaps=False,
                     customdata=customdata_list,
-                    hovertemplate=f'<b>Time:</b> %{{x:.3f}} UTC<br><b>Wavelength:</b> {int(wl)} nm<br><b>{prop_info["display_name"]}:</b> %{{y:.{prop_info["decimals"]}f}}<extra></extra>'
+                    hovertemplate=f'<b>Time:</b> %{{x:.3f}} UTC<br><b>Wavelength:</b> {int(wl)} nm<br><b>{prop_info["display_name"]}:</b> %{{y:.{prop_info["decimals"]}f}}<br><b>Lat:</b> %{{customdata[1]:.4f}}°<br><b>Lon:</b> %{{customdata[2]:.4f}}°<extra></extra>'
                 ))
+
+            # Add HSRL2 AOD overlay traces
+            if show_hsrl:
+                for hsrl_wl, hsrl_key, color, symbol in [
+                    (532, 'aod_532', 'rgba(0,180,0,0.9)',   'diamond'),
+                    (355, 'aod_355', 'rgba(100,0,200,0.9)', 'diamond'),
+                ]:
+                    aod = hsrl_data[hsrl_key]
+                    valid = (np.isfinite(hsrl_data['time']) & np.isfinite(aod) &
+                             np.isfinite(hsrl_data['lat'])  & np.isfinite(hsrl_data['lon']))
+                    if not np.any(valid):
+                        continue
+                    hover_cd = np.column_stack([hsrl_data['time'][valid], aod[valid],
+                                                hsrl_data['lat'][valid], hsrl_data['lon'][valid]])
+                    fig.add_trace(go.Scatter(
+                        x=hsrl_data['time'][valid],
+                        y=aod[valid],
+                        name=f'HSRL2 {hsrl_wl} nm',
+                        visible=True,
+                        mode='markers',
+                        line=dict(color=color, width=1.5, dash='dash'),
+                        marker=dict(size=5, color=color, symbol=symbol),
+                        customdata=hover_cd,
+                        hovertemplate=(
+                            f'<b>HSRL2 {hsrl_wl} nm</b><br>'
+                            '<b>Time:</b> %{customdata[0]:.3f} UTC<br>'
+                            '<b>AOD:</b> %{customdata[1]:.5f}<br>'
+                            '<b>Lat:</b> %{customdata[2]:.4f}°<br>'
+                            '<b>Lon:</b> %{customdata[3]:.4f}°'
+                            '<extra></extra>'
+                        ),
+                    ))
 
         else:
             # Wavelength-independent: look for {property}_{mode}
@@ -6582,28 +6663,39 @@ def run_app(initial_file_path, directory_path):
 
                 # Property vs Time plot container (for airborne/RSP data)
                 html.Div([
-                    # Property selector dropdown
+                    # Property selector and HSRL overlay dropdowns (side by side)
                     html.Div([
-                        html.Label("Select Property to Plot:", style={
-                            'fontWeight': 'bold',
-                            'marginBottom': '5px',
-                            'display': 'block',
-                            'fontSize': '14px',
-                            'textAlign': 'center'
-                        }),
-                        dcc.Dropdown(
-                            id='property-time-selector',
-                            options=[],
-                            value='optical_depth|total',
-                            placeholder="Aerosol Optical Depth - Total",
-                            style={
-                                'marginBottom': '15px',
-                                'fontSize': '12px',
-                                'maxWidth': '500px',
-                                'margin': '0 auto'
-                            }
-                        ),
-                    ], style={'marginBottom': '20px'}),
+                        html.Div([
+                            html.Label("Select Property to Plot:", style={
+                                'fontWeight': 'bold',
+                                'marginBottom': '5px',
+                                'display': 'block',
+                                'fontSize': '14px',
+                                'textAlign': 'center'
+                            }),
+                            dcc.Dropdown(
+                                id='property-time-selector',
+                                options=[],
+                                value='optical_depth|total',
+                                placeholder="Aerosol Optical Depth - Total",
+                                style={'fontSize': '12px'}
+                            ),
+                        ], style={'flex': '1', 'paddingRight': '10px'}),
+                        html.Div([
+                            html.Label("HSRL2 AOD Overlay:", style={
+                                'fontWeight': 'bold', 'marginBottom': '5px',
+                                'display': 'block', 'fontSize': '14px', 'textAlign': 'center'
+                            }),
+                            dcc.Dropdown(
+                                id='hsrl-file-selector',
+                                options=[{'label': 'None (no overlay)', 'value': ''}] + file_options,
+                                value='',
+                                clearable=False,
+                                style={'fontSize': '12px'}
+                            ),
+                        ], style={'flex': '1', 'paddingLeft': '10px'}),
+                    ], style={'display': 'flex', 'flexDirection': 'row',
+                              'alignItems': 'flex-end', 'marginBottom': '20px'}),
 
                     # Container for single or dual plots (controlled by callback)
                     html.Div([
@@ -8765,11 +8857,13 @@ def run_app(initial_file_path, directory_path):
          Input('applied-cost-value', 'data'),
          Input('applied-threshold-value', 'data'),
          Input('applied-threshold-value-2', 'data'),
-         Input('time-plot-clicked-point-store', 'data')],
+         Input('time-plot-clicked-point-store', 'data'),
+         Input('hsrl-file-selector', 'value')],
         prevent_initial_call=True
     )
     def update_aod_time_plots(file_path_1, file_path_2, analysis_mode, active_tab, selected_property,
-                              max_cost, threshold_params, threshold_params_2, clicked_point_data):
+                              max_cost, threshold_params, threshold_params_2, clicked_point_data,
+                              hsrl_file_path):
         print(f"Doing callback: update_aod_time_plots with property={selected_property}")
         """
         Callback for Property vs Time plot for airborne/RSP data.
@@ -8785,6 +8879,9 @@ def run_app(initial_file_path, directory_path):
             parts = selected_property.split('|')
             property_name = parts[0]
             mode = parts[1]
+
+        # Load HSRL data if a file is selected
+        hsrl_data = read_hsrl_file(hsrl_file_path) if hsrl_file_path else None
 
         # Extract highlight info from clicked point data
         highlight_time_index = None
@@ -8845,7 +8942,7 @@ def run_app(initial_file_path, directory_path):
                     # Only highlight if this plot was clicked
                     highlight_idx_1 = highlight_time_index if (clicked_point_data and clicked_point_data.get('source_plot') == 'plot-1') else None
                     highlight_y_1 = highlight_y_value if (clicked_point_data and clicked_point_data.get('source_plot') == 'plot-1') else None
-                    fig1 = create_property_vs_time_plot(data_dict_1, property_name=property_name, mode=mode, title_suffix=f"File 1: {filename1}", max_cost=max_cost, highlight_time_index=highlight_idx_1, highlight_y_value=highlight_y_1, threshold_params=threshold_params)
+                    fig1 = create_property_vs_time_plot(data_dict_1, property_name=property_name, mode=mode, title_suffix=f"File 1: {filename1}", max_cost=max_cost, highlight_time_index=highlight_idx_1, highlight_y_value=highlight_y_1, threshold_params=threshold_params, hsrl_data=hsrl_data)
                 else:
                     fig1 = go.Figure()
                     fig1.add_annotation(
@@ -8876,7 +8973,7 @@ def run_app(initial_file_path, directory_path):
                     # Only highlight if this plot was clicked
                     highlight_idx_2 = highlight_time_index if (clicked_point_data and clicked_point_data.get('source_plot') == 'plot-2') else None
                     highlight_y_2 = highlight_y_value if (clicked_point_data and clicked_point_data.get('source_plot') == 'plot-2') else None
-                    fig2 = create_property_vs_time_plot(data_dict_2, property_name=property_name, mode=mode, title_suffix=f"File 2: {filename2}", max_cost=max_cost, highlight_time_index=highlight_idx_2, highlight_y_value=highlight_y_2, threshold_params=threshold_params_2)
+                    fig2 = create_property_vs_time_plot(data_dict_2, property_name=property_name, mode=mode, title_suffix=f"File 2: {filename2}", max_cost=max_cost, highlight_time_index=highlight_idx_2, highlight_y_value=highlight_y_2, threshold_params=threshold_params_2, hsrl_data=hsrl_data)
                 else:
                     fig2 = go.Figure()
                     fig2.add_annotation(
@@ -8987,7 +9084,7 @@ def run_app(initial_file_path, directory_path):
                 )
 
             # Create the property vs time plot
-            single_fig = create_property_vs_time_plot(data_dict, property_name=property_name, mode=mode, max_cost=max_cost, highlight_time_index=highlight_time_index, highlight_y_value=highlight_y_value, threshold_params=threshold_params)
+            single_fig = create_property_vs_time_plot(data_dict, property_name=property_name, mode=mode, max_cost=max_cost, highlight_time_index=highlight_time_index, highlight_y_value=highlight_y_value, threshold_params=threshold_params, hsrl_data=hsrl_data)
             return (
                 {'display': 'block'},
                 {'display': 'none'},
@@ -9069,6 +9166,12 @@ def run_app(initial_file_path, directory_path):
             if 'customdata' in point_data:
                 # customdata is a 2D array, extract first element
                 customdata_value = point_data['customdata']
+                # Guard: HSRL traces store 4 floats [time, aod, lat, lon]; RSP stores 1 index.
+                # Clicking an HSRL trace should not trigger RSP property lookup.
+                if isinstance(customdata_value, (list, tuple, np.ndarray)) and len(customdata_value) == 4:
+                    if stored_click_data:
+                        return stored_click_data, no_update, no_update, no_update
+                    return None, "", "", {'display': 'none'}
                 if isinstance(customdata_value, (list, tuple, np.ndarray)):
                     time_index = int(customdata_value[0])
                 else:

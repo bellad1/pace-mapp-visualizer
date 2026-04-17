@@ -69,8 +69,12 @@ def read_hsrl_file(file_path):
                 'time':    f['/Nav_Data/gps_time'][:].squeeze().astype(np.float64),
                 'lat':     f['/Nav_Data/gps_lat'][:].squeeze().astype(np.float64),
                 'lon':     f['/Nav_Data/gps_lon'][:].squeeze().astype(np.float64),
-                'aod_532': f['/DataProducts/532_AOT_hi'][:].squeeze().astype(np.float64),
-                'aod_355': f['/DataProducts/355_AOT_hi'][:].squeeze().astype(np.float64),
+                # Here we're switching to a NN method of AOD retrieval from backscatter
+                # because boundary layer turbulance caused negative AOD values
+                # 'aod_532': f['/DataProducts/532_AOT_hi'][:].squeeze().astype(np.float64),
+                # 'aod_355': f['/DataProducts/355_AOT_hi'][:].squeeze().astype(np.float64),
+                'aod_532': f['/DataProducts/532_AOT_from_bsc'][:].squeeze().astype(np.float64),
+                'aod_355': f['/DataProducts/355_AOT_from_bsc'][:].squeeze().astype(np.float64),
             }
         _hsrl_cache[file_path] = result
         return result

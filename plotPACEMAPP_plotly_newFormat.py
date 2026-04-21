@@ -6453,12 +6453,218 @@ def run_app(initial_file_path, directory_path):
             html.Div([
                 # About content
                 html.Div([
-                    html.H2("About PACE-MAPP Aerosol Properties Visualization Tool",
-                            style={'textAlign': 'center', 'marginBottom': '20px', 'color': '#2c3e50'}),
-                    html.P("This Python application creates an interactive web-based visualization tool for exploring atmospheric aerosol properties from PACE (Plankton, Aerosol, Cloud, ocean Ecosystem). PACE instruments are HARP2 (polarimeter), SPEXone (polarimeter), and OCI and the Microphysical Aerosol Properties from Polarimetry (MAPP) retrieval framework (Stamnes et al., 2023).", 
-                           style={'textAlign': 'center', 'marginRight': '10%', 'marginLeft': '10%', 'marginBottom': '20px'}),
-                    html.P("Select a file and plot type from the dropdown menu on the left. Use the controls to filter data, select points, and export visualizations.",
-                           style={'textAlign': 'center', 'marginRight': '10%', 'marginLeft': '10%'}),
+                    # ── Header ──────────────────────────────────────────
+                    # html.H2("PACE-MAPP Aerosol Properties Visualization Tool",
+                    #         style={'textAlign': 'center', 'marginBottom': '6px', 'color': '#2c3e50'}),
+                    html.H2("Interactively explore aerosol property retrievals with the MAPP retrieval framework (PACE, RSP, PolCube)",
+                            style={'textAlign': 'center', 'marginBottom': '6px', 'marginTop': '0px', 'color': '#2c3e50'}),
+                    # html.P("Interactive exploration of aerosol retrievals with the MAPP Framework (PACE, RSP, PolCube)",
+                    #        style={'textAlign': 'center', 'color': '#7f8c8d', 'fontSize': '15px', 'marginBottom': '30px'}),
+
+                    # ── wrapper to constrain width ───────────────────────
+                    html.Div([
+
+                        # ── Scientific Background ─────────
+                        html.H3("Scientific Background",
+                                style={'color': '#2980b9', 'borderBottom': '2px solid #2980b9',
+                                       'paddingBottom': '0px', 'marginBottom': '8px'}),
+                        html.P([
+                            "The ",
+                            html.Strong("PACE"),
+                            " (Plankton, Aerosol, Cloud, ocean Ecosystem) satellite carries three instruments: ",
+                            html.Strong("HARP2"), " and ", html.Strong("SPEXone"),
+                            " (multi-angle polarimeters) and ", html.Strong("OCI"), " (hyperspectral radiometer). "
+                            "Aerosol microphysical properties: optical depth, single scattering albedo, refractive index, "
+                            "and size distribution are retrieved from these measurements using the ",
+                            html.Strong("MAPP"),
+                            " (Microphysical Aerosol Properties from Polarimetry) framework (Stamnes et al., 2023).",
+                            ], style={'marginBottom': '14px', 'marginTop': '0px', 'lineHeight': '1.7'}),
+
+                        # ── Filtering ─────────
+                        html.H3("Point Filtering",
+                                style={'color': '#2980b9', 'borderBottom': '2px solid #2980b9',
+                                       'paddingBottom': '0px', 'marginBottom': '8px'}),
+                        html.P([
+                            html.Strong("Cost function:"),
+                            " the goodness-of-fit metric from the MAPP retrieval. Lower values indicate better agreement "
+                            "between the forward model and measurements. Use the Cost Filter in the left panel to exclude "
+                            "poor-quality retrievals (a threshold of 0.5 is a reasonable starting point). "
+                            "Adjusting the slider does not update plots immediately, you must click ",
+                            html.Strong("Apply"),
+                            " to commit the filter.",
+                            ], style={'marginBottom': '12px', 'marginTop': '0px', 'lineHeight': '1.7'}),
+                        html.P([
+                            html.Strong("Intensity threshold (RSP only):"),
+                            " provides a second layer of quality control based on how well the forward model "
+                            "reproduces the measured intensity across viewing angles. The user selects a wavelength to filter on, "
+                            "a minimum percentage of views that must pass, and a residual threshold (%). A pixel is retained only "
+                            "if the specified fraction of its viewing angles fall within the residual threshold. "
+                            "This is applied after cost filtering and is useful for removing pixels where the intensity fit "
+                            "is poor even at low cost, for example near cloud edges or in geometrically complex scenes.",
+                            ], style={'marginBottom': '24px', 'marginTop': '0px', 'lineHeight': '1.7'}),
+
+                        # ── Validation ─────────
+                        html.H3("PACE-PAX Field Campaign",
+                                style={'color': '#2980b9', 'borderBottom': '2px solid #2980b9',
+                                       'paddingBottom': '0px', 'marginBottom': '9px'}),
+                        html.P([
+                            "The ",
+                            html.Strong("PACE-PAX"),
+                            " field campaign (September 2024, NASA ER-2 aircraft) was designed to validate PACE satellite retrievals "
+                            "with coincident airborne measurements. Three airborne instruments flew together:",
+                            ], style={'marginBottom': '10px', 'marginTop': '0px', 'lineHeight': '1.7'}),
+
+                        # ── Instrument table ─────────────────────────────
+                        html.Table([
+                            html.Thead(html.Tr([
+                                html.Th("Instrument", style={'width': '18%'}),
+                                html.Th("Type",        style={'width': '22%'}),
+                                html.Th("Mounting",    style={'width': '20%'}),
+                                html.Th("Key data in this visualizer"),
+                            ])),
+                            html.Tbody([
+                                html.Tr([
+                                    html.Td(html.Strong("RSP")),
+                                    html.Td("Multi-angle polarimeter"),
+                                    html.Td("Wing pod"),
+                                    html.Td("AOD, SSA, refractive index, reff at multiple wavelengths along flight track"),
+                                ]),
+                                html.Tr([
+                                    html.Td(html.Strong("SPEXone Airborne")),
+                                    html.Td("Multi-angle polarimeter"),
+                                    html.Td("Aircraft body (nadir)"),
+                                    html.Td("AOT at 550 nm across 11 across-track bins; center bin (bin 5) co-located with HSRL2"),
+                                ], style={'backgroundColor': '#f8f9fa'}),
+                                html.Tr([
+                                    html.Td(html.Strong("HSRL2")),
+                                    html.Td("Lidar"),
+                                    html.Td("Aircraft body (nadir)"),
+                                    html.Td("AOD at 532 nm and 355 nm along flight track (used as retrieval truth)"),
+                                ]),
+                            ]),
+                        ], style={
+                            'width': '100%', 'borderCollapse': 'collapse', 'marginBottom': '20px',
+                            'fontSize': '13px',
+                        }),
+
+                        html.P([
+                            html.Strong("Note on instrument geometry: "),
+                            "RSP is wing-mounted and may view a slightly different air mass than the nadir-pointing HSRL2 and SPEXone. "
+                            "When comparing RSP to HSRL2 or SPEX, consider toggling adjacent SPEX across-track bins (e.g. bins 4 or 6) "
+                            "in the Property vs Time tab, as one of these may better match what RSP sees from the wing pod.",
+                        ], style={'backgroundColor': '#eaf4fb', 'padding': '12px', 'borderRadius': '6px',
+                                  'border': '1px solid #aed6f1', 'marginBottom': '24px',
+                                  'lineHeight': '1.7', 'fontSize': '13px'}),
+
+                        # ── Quick Start ──────────────────────────────────
+                        html.H3("Quick Start",
+                                style={'color': '#2980b9', 'borderBottom': '2px solid #2980b9',
+                                       'paddingBottom': '0px', 'marginBottom': '8px'}),
+                        html.Ol([
+                            html.Li("Select a retrieval file from the dropdown in the left panel.",
+                                    style={'marginBottom': '6px', 'marginTop': '0px'}),
+                            html.Li("Choose a plot type from the dropdown at the top of this panel.",
+                                    style={'marginBottom': '6px'}),
+                            html.Li([
+                                "On the ",
+                                html.Strong("Scatter + Intensity/DoLP"),
+                                " tab, click any point on the map to inspect all retrieved properties and angular measurements at that pixel.",
+                            ], style={'marginBottom': '6px'}),
+                            html.Li([
+                                "Use the ",
+                                html.Strong("Cost Filter"),
+                                " to remove poor-quality retrievals, then click ",
+                                html.Strong("Apply"),
+                                " to update the plots.",
+                            ], style={'marginBottom': '6px'}),
+                            html.Li([
+                                "To compare two files side by side, select ",
+                                html.Strong("Compare Files"),
+                                " mode from the analysis mode toggle above the file selector.",
+                                ], style={'marginBottom': '6px'}),
+                            ], style={'lineHeight': '1.7', 'marginBottom': '24px', 'marginTop': '0px', 'paddingLeft': '20px'}),
+
+                        # ── Plot tab reference ───────────────────────────
+                        html.H3("Analysis (plot) Types",
+                                style={'color': '#2980b9', 'borderBottom': '2px solid #2980b9',
+                                       'paddingBottom': '0px', 'marginBottom': '8px'}),
+                        html.Table([
+                            html.Thead(html.Tr([
+                                html.Th("Tab",         style={'width': '28%'}),
+                                html.Th("What it shows"),
+                            ])),
+                            html.Tbody([
+                                html.Tr([
+                                    html.Td(html.Strong("Scatter + Intensity/DoLP")),
+                                    html.Td("Geospatial map of any retrieved property. Click a point to open angular Intensity and DoLP measurements for that pixel."),
+                                ]),
+                                html.Tr([
+                                    html.Td(html.Strong("Property vs Time")),
+                                    html.Td("RSP retrieved properties along the flight track vs UTC time. Optional: overlay HSRL2 AOD (532/355 nm) and SPEXone AOT (550 nm, all across-track bins) for direct comparison."),
+                                ], style={'backgroundColor': '#f8f9fa'}),
+                                html.Tr([
+                                    html.Td(html.Strong("AOD vs Wavelength")),
+                                    html.Td("Spectral aerosol optical depth at a clicked pixel."),
+                                ]),
+                                html.Tr([
+                                    html.Td(html.Strong("Polarized Reflectance")),
+                                    html.Td("Measured vs. modeled Intensity and degree of linear polarization (DoLP) at a clicked pixel."),
+                                ], style={'backgroundColor': '#f8f9fa'}),
+                                html.Tr([
+                                    html.Td(html.Strong("Residual Analysis")),
+                                    html.Td("Per-channel fit residuals between measurement and forward model at a clicked pixel."),
+                                ]),
+                                html.Tr([
+                                    html.Td(html.Strong("Solar and Instrument Geometry")),
+                                    html.Td("Scattering angle geometry for the selected pixel and flight segment."),
+                                ], style={'backgroundColor': '#f8f9fa'}),
+                                html.Tr([
+                                    html.Td(html.Strong("Histogram")),
+                                    html.Td("Frequency distribution of any retrieved property across all pixels in the file."),
+                                ]),
+                                html.Tr([
+                                    html.Td(html.Strong("Image/Swath Comparison")),
+                                    html.Td("Side-by-side spatial comparison of two files (Compare Files mode only; Requires 1 PACE and 1 RSP file)."),
+                                ], style={'backgroundColor': '#f8f9fa'}),
+                            ]),
+                        ], style={
+                            'width': '100%', 'borderCollapse': 'collapse', 'marginBottom': '24px',
+                            'fontSize': '13px',
+                        }),
+
+                        # ── Tips ────────────────────────────────────────
+                        html.H3("Tips",
+                                style={'color': '#2980b9', 'borderBottom': '2px solid #2980b9',
+                                       'paddingBottom': '0px', 'marginBottom': '8px'}),
+                        html.Ul([
+                            html.Li([
+                                html.Strong("Cost filter requires Apply: "),
+                                "Adjusting the cost slider does not update plots immediately. User must click the Apply button to commit the filter.",
+                                ], style={'marginBottom': '8px', 'marginTop': '0px'}),
+                            html.Li([
+                                html.Strong("Toggling plot traces on/off: "),
+                                "All plot traces (e.g., each component in plot legend) can be turned on/off by clicking icon in plot legend. Double-click to isolate one trace only.",
+                            ], style={'marginBottom': '8px'}),
+                            html.Li([
+                                html.Strong("Property vs Time wavelength toggling: "),
+                                "Only the 532 nm RSP trace is shown by default. All other wavelengths are in the legend and can be clicked to toggle on/off.",
+                            ], style={'marginBottom': '8px'}),
+                            html.Li([
+                                html.Strong("SPEX across-track bins: "),
+                                "Only bin 5 (center, co-located with HSRL2) is shown by default. Toggle other bins from the legend to investigate whether RSP agrees better with an off-center bin.",
+                            ], style={'marginBottom': '8px'}),
+                            html.Li([
+                                html.Strong("Multiple SPEX files: "),
+                                "There are multiple SPEX granule files per flight day. Select all relevant LAND or OCEAN files to see the full flight track.",
+                            ], style={'marginBottom': '8px'}),
+                            html.Li([
+                                html.Strong("Changing files stays on the current tab: "),
+                                "Loading a new file keeps you on whichever tab you are viewing.",
+                            ], style={'marginBottom': '8px'}),
+                            ], style={'lineHeight': '1.7', 'marginTop': '0px', 'paddingLeft': '20px'}),
+
+                    ], style={'maxWidth': '1200px', 'margin': '0 auto'}),
+
                 ], id='plot-about', style={'display': 'block', 'padding': '40px'}),
 
                 # -------------------------------------------------------
@@ -8870,7 +9076,7 @@ def run_app(initial_file_path, directory_path):
 
         # If no point clicked yet
         if clicked_data is None:
-            return html.Div("Click on a point in the Individual tab to see properties")
+            return html.Div("Click a point in the Scatter + Intensity/DoLP tab (scatter plot) to see properties")
 
         # Use the same table as the one in the main visualization
         return properties_table_content
@@ -8899,7 +9105,7 @@ def run_app(initial_file_path, directory_path):
         if clicked_data is None:
             fig = go.Figure()
             fig.add_annotation(
-                text="Click on a point in the Individual tab to see total AOD vs wavelength",
+                text="Click a point in the Scatter + Intensity/DoLP tab (scatter plot) to see total AOD vs wavelength",
                 xref="paper", yref="paper",
                 x=0.5, y=0.5,
                 showarrow=False,
@@ -9554,7 +9760,7 @@ def run_app(initial_file_path, directory_path):
 
         # If no point clicked yet
         if clicked_data is None:
-            return html.Div("Click on a point in the Individual tab to see properties")
+            return html.Div("Click a point in the Scatter + Intensity/DoLP tab (scatter plot) to see properties")
 
         # Use the same table as the one in the main visualization
         return properties_table_content
@@ -9586,7 +9792,7 @@ def run_app(initial_file_path, directory_path):
         if clicked_data is None:
             fig = go.Figure()
             fig.add_annotation(
-                text="Click on a point in the Individual tab to see polarized reflectance",
+                text="Click a point in the Scatter + Intensity/DoLP tab (scatter plot) to see polarized reflectance",
                 xref="paper", yref="paper",
                 x=0.5, y=0.5,
                 showarrow=False,
@@ -9732,7 +9938,7 @@ def run_app(initial_file_path, directory_path):
 
         # If no point clicked yet
         if clicked_data is None:
-            return html.Div("Click on a point in the Individual tab to see properties")
+            return html.Div("Click a point in the Scatter + Intensity/DoLP tab (scatter plot) to see properties")
 
         # Use the same table as the one in the main visualization
         return properties_table_content
@@ -9762,7 +9968,7 @@ def run_app(initial_file_path, directory_path):
         if clicked_data is None:
             fig = go.Figure()
             fig.add_annotation(
-                text="Click on a point in the Individual tab to see residuals",
+                text="Click a point in the Scatter + Intensity/DoLP tab (scatter plot) to see residuals",
                 xref="paper", yref="paper",
                 x=0.5, y=0.5,
                 showarrow=False,

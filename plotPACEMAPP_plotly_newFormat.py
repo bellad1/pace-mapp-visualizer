@@ -6024,7 +6024,7 @@ def run_app(initial_file_path, directory_path):
                             placeholder="Please select a second file...",
                             style={
                                 'marginBottom': '15px',
-                                'fontSize': '14px'
+                                'fontSize': '12px'
                             }
                         ),
                     ], id='individual-file-2-container', style={'display': 'none'}),
@@ -9931,7 +9931,7 @@ def run_app(initial_file_path, directory_path):
                 None,
                 new_default_cost_value,
                 f"Cost Filter (Default={default_cost:.2f}/Range=[{new_min_cost_value:.3f}, {new_max_cost_value:.3f}]):",
-                'scatter'  # plot-type-selector: auto-navigate to Scatter plot
+                no_update  # stay on current tab
             )
 
         except Exception as e:

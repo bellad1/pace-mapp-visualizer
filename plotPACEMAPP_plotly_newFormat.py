@@ -19,6 +19,7 @@ verbose = 1
 default_cost = 0.5
 _data_cache = {}
 _hsrl_cache = {}
+_spex_cache = {}
 
 
 # =============================================================================
@@ -80,6 +81,37 @@ def read_hsrl_file(file_path):
         return result
     except Exception as e:
         print(f"Warning: Could not read HSRL file {file_path}: {e}")
+        return None
+
+
+def read_spex_file(file_path):
+    """Read SPEX Airborne L2 NetCDF4; return 2D arrays (along_track, 11). Cache result."""
+    global _spex_cache
+    if file_path in _spex_cache:
+        return _spex_cache[file_path]
+    try:
+        with h5py.File(file_path, 'r') as f:
+            fill = -32767.0
+
+            def clean(arr):
+                a = arr[:].squeeze().astype(np.float64)
+                a[a <= fill * 0.9] = np.nan
+                return a
+
+            result = {
+                'time':         clean(f['/geolocation_data/fracday']) * 24.0,
+                'lat':          clean(f['/geolocation_data/latitude']),
+                'lon':          clean(f['/geolocation_data/longitude']),
+                'aot550':       clean(f['/geophysical_data/aot550']),
+                'quality_flag': f['/diagnostic_data/quality_flag'][:].squeeze().astype(np.float64),
+            }
+            # Mask poor-quality pixels (quality_flag == 0 is good)
+            bad = result['quality_flag'] != 0
+            result['aot550'][bad] = np.nan
+        _spex_cache[file_path] = result
+        return result
+    except Exception as e:
+        print(f"Warning: Could not read SPEX file {file_path}: {e}")
         return None
 
 
@@ -4152,7 +4184,7 @@ def create_residual_plot(data_dict, selected_row, selected_col, residual_type='b
         return fig
 
 
-def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode='total', title_suffix="", max_cost=None, highlight_time_index=None, highlight_y_value=None, threshold_params=None, hsrl_data=None):
+def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode='total', title_suffix="", max_cost=None, highlight_time_index=None, highlight_y_value=None, threshold_params=None, hsrl_data=None, spex_data=None):
     """
     Create a plot showing any retrieval property vs time for airborne data (RSP).
     Shows all available wavelengths for the specified property-mode combination.
@@ -4276,9 +4308,14 @@ def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode=
             wavelengths = [wl for wl, _ in wavelength_mapping]
             wl_colors = generate_wavelength_colors(wavelengths)
 
-            # Determine if HSRL overlay is active
+            # Determine if HSRL / SPEX overlays are active
             show_hsrl = (
                 hsrl_data is not None
+                and property_name == 'optical_depth'
+                and mode == 'total'
+            )
+            show_spex = (
+                spex_data is not None
                 and property_name == 'optical_depth'
                 and mode == 'total'
             )
@@ -4325,10 +4362,8 @@ def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode=
                 else:
                     customdata_list = [[int(idx), None, None] for idx in original_indices]
 
-                # Determine visibility: when HSRL overlay is active, show only 532 nm RSP by default
-                rsp_visible = True
-                if show_hsrl:
-                    rsp_visible = True if abs(int(wl) - 532) < 5 else 'legendonly'
+                # Default: show only 532 nm RSP; other wavelengths togglable via legend
+                rsp_visible = True if abs(int(wl) - 532) < 5 else 'legendonly'
 
                 # Add trace
                 fig.add_trace(go.Scatter(
@@ -4353,16 +4388,17 @@ def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode=
                 ]:
                     aod = hsrl_data[hsrl_key]
                     valid = (np.isfinite(hsrl_data['time']) & np.isfinite(aod) &
-                             np.isfinite(hsrl_data['lat'])  & np.isfinite(hsrl_data['lon']))
+                             np.isfinite(hsrl_data['lat']) & np.isfinite(hsrl_data['lon']))
                     if not np.any(valid):
                         continue
                     hover_cd = np.column_stack([hsrl_data['time'][valid], aod[valid],
                                                 hsrl_data['lat'][valid], hsrl_data['lon'][valid]])
+                    hsrl_visible = True if abs(int(hsrl_wl) - 532) < 5 else 'legendonly'
                     fig.add_trace(go.Scatter(
                         x=hsrl_data['time'][valid],
                         y=aod[valid],
                         name=f'HSRL2 {hsrl_wl} nm',
-                        visible=True,
+                        visible=hsrl_visible,
                         mode='markers',
                         line=dict(color=color, width=1.5, dash='dash'),
                         marker=dict(size=5, color=color, symbol=symbol),
@@ -4371,6 +4407,57 @@ def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode=
                             f'<b>HSRL2 {hsrl_wl} nm</b><br>'
                             '<b>Time:</b> %{customdata[0]:.3f} UTC<br>'
                             '<b>AOD:</b> %{customdata[1]:.5f}<br>'
+                            '<b>Lat:</b> %{customdata[2]:.4f}°<br>'
+                            '<b>Lon:</b> %{customdata[3]:.4f}°'
+                            '<extra></extra>'
+                        ),
+                    ))
+
+            # Add SPEX Airborne AOD overlay traces (one per across-track bin)
+            if show_spex:
+                n_bins = spex_data['aot550'].shape[1]
+                center_bin = n_bins // 2  # bin 5
+
+                def spex_bin_color(bin_idx):
+                    dist = abs(bin_idx - center_bin)
+                    alpha = round(0.9 - dist * 0.1, 1)
+                    g = int(140 + dist * 18)
+                    b = int(dist * 20)
+                    return f'rgba(255,{g},{b},{alpha})'
+
+                for b_idx in range(n_bins):
+                    aot = spex_data['aot550'][:, b_idx]
+                    t   = spex_data['time'][:, b_idx]
+                    lat = spex_data['lat'][:, b_idx]
+                    lon = spex_data['lon'][:, b_idx]
+
+                    valid = (np.isfinite(t) & np.isfinite(aot) &
+                             np.isfinite(lat) & np.isfinite(lon))
+                    if not np.any(valid):
+                        continue
+
+                    sort_idx = np.argsort(t[valid])
+                    tv   = t[valid][sort_idx]
+                    av   = aot[valid][sort_idx]
+                    latv = lat[valid][sort_idx]
+                    lonv = lon[valid][sort_idx]
+
+                    is_center = (b_idx == center_bin)
+                    label = f'SPEX Bin {b_idx} (center)' if is_center else f'SPEX Bin {b_idx}'
+                    hover_cd = np.column_stack([tv, av, latv, lonv])
+
+                    fig.add_trace(go.Scatter(
+                        x=tv,
+                        y=av,
+                        mode='markers',
+                        name=label,
+                        visible=True if is_center else 'legendonly',
+                        marker=dict(size=6, color=spex_bin_color(b_idx), symbol='square'),
+                        customdata=hover_cd,
+                        hovertemplate=(
+                            f'<b>{label}</b><br>'
+                            '<b>Time:</b> %{customdata[0]:.3f} UTC<br>'
+                            '<b>AOT 550nm:</b> %{customdata[1]:.5f}<br>'
                             '<b>Lat:</b> %{customdata[2]:.4f}°<br>'
                             '<b>Lon:</b> %{customdata[3]:.4f}°'
                             '<extra></extra>'
@@ -6692,14 +6779,32 @@ def run_app(initial_file_path, directory_path):
                             }),
                             dcc.Dropdown(
                                 id='hsrl-file-selector',
-                                options=[{'label': 'None (no overlay)', 'value': ''}] + file_options,
+                                # options=[{'label': 'None (no overlay)', 'value': ''}] + [o for o in file_options if 'HSRL' in o['label']],
+                                options=[o for o in file_options if 'HSRL' in o['label']],
                                 value='',
+                                placeholder="None (no overlay)",
                                 clearable=False,
                                 style={'fontSize': '12px'}
                             ),
                         ], style={'flex': '1', 'paddingLeft': '10px'}),
                     ], style={'display': 'flex', 'flexDirection': 'row',
-                              'alignItems': 'flex-end', 'marginBottom': '20px'}),
+                              'alignItems': 'flex-end', 'marginBottom': '10px'}),
+
+                    # SPEX Airborne multi-select (full width row)
+                    html.Div([
+                        html.Label("SPEX Airborne AOD Overlay:", style={
+                            'fontWeight': 'bold', 'marginBottom': '5px',
+                            'display': 'block', 'fontSize': '14px', 'textAlign': 'center'
+                        }),
+                        dcc.Dropdown(
+                            id='spex-file-selector',
+                            options=[o for o in file_options if 'SPEXAIRBORNE' in o['label']],
+                            value=[],
+                            multi=True,
+                            placeholder="Select SPEX file(s) — leave empty for no overlay",
+                            style={'fontSize': '12px'},
+                        ),
+                    ], style={'marginBottom': '20px'}),
 
                     # Container for single or dual plots (controlled by callback)
                     html.Div([
@@ -8862,12 +8967,13 @@ def run_app(initial_file_path, directory_path):
          Input('applied-threshold-value', 'data'),
          Input('applied-threshold-value-2', 'data'),
          Input('time-plot-clicked-point-store', 'data'),
-         Input('hsrl-file-selector', 'value')],
+         Input('hsrl-file-selector', 'value'),
+         Input('spex-file-selector', 'value')],
         prevent_initial_call=True
     )
     def update_aod_time_plots(file_path_1, file_path_2, analysis_mode, active_tab, selected_property,
                               max_cost, threshold_params, threshold_params_2, clicked_point_data,
-                              hsrl_file_path):
+                              hsrl_file_path, spex_file_paths):
         print(f"Doing callback: update_aod_time_plots with property={selected_property}")
         """
         Callback for Property vs Time plot for airborne/RSP data.
@@ -8886,6 +8992,17 @@ def run_app(initial_file_path, directory_path):
 
         # Load HSRL data if a file is selected
         hsrl_data = read_hsrl_file(hsrl_file_path) if hsrl_file_path else None
+
+        # Load and concatenate all selected SPEX files
+        spex_data = None
+        if spex_file_paths:
+            arrays = [read_spex_file(p) for p in spex_file_paths if p]
+            arrays = [a for a in arrays if a is not None]
+            if arrays:
+                spex_data = {
+                    key: np.concatenate([a[key] for a in arrays], axis=0)
+                    for key in ('time', 'lat', 'lon', 'aot550')
+                }
 
         # Extract highlight info from clicked point data
         highlight_time_index = None
@@ -8946,7 +9063,7 @@ def run_app(initial_file_path, directory_path):
                     # Only highlight if this plot was clicked
                     highlight_idx_1 = highlight_time_index if (clicked_point_data and clicked_point_data.get('source_plot') == 'plot-1') else None
                     highlight_y_1 = highlight_y_value if (clicked_point_data and clicked_point_data.get('source_plot') == 'plot-1') else None
-                    fig1 = create_property_vs_time_plot(data_dict_1, property_name=property_name, mode=mode, title_suffix=f"File 1: {filename1}", max_cost=max_cost, highlight_time_index=highlight_idx_1, highlight_y_value=highlight_y_1, threshold_params=threshold_params, hsrl_data=hsrl_data)
+                    fig1 = create_property_vs_time_plot(data_dict_1, property_name=property_name, mode=mode, title_suffix=f"File 1: {filename1}", max_cost=max_cost, highlight_time_index=highlight_idx_1, highlight_y_value=highlight_y_1, threshold_params=threshold_params, hsrl_data=hsrl_data, spex_data=spex_data)
                 else:
                     fig1 = go.Figure()
                     fig1.add_annotation(
@@ -8977,7 +9094,7 @@ def run_app(initial_file_path, directory_path):
                     # Only highlight if this plot was clicked
                     highlight_idx_2 = highlight_time_index if (clicked_point_data and clicked_point_data.get('source_plot') == 'plot-2') else None
                     highlight_y_2 = highlight_y_value if (clicked_point_data and clicked_point_data.get('source_plot') == 'plot-2') else None
-                    fig2 = create_property_vs_time_plot(data_dict_2, property_name=property_name, mode=mode, title_suffix=f"File 2: {filename2}", max_cost=max_cost, highlight_time_index=highlight_idx_2, highlight_y_value=highlight_y_2, threshold_params=threshold_params_2, hsrl_data=hsrl_data)
+                    fig2 = create_property_vs_time_plot(data_dict_2, property_name=property_name, mode=mode, title_suffix=f"File 2: {filename2}", max_cost=max_cost, highlight_time_index=highlight_idx_2, highlight_y_value=highlight_y_2, threshold_params=threshold_params_2, hsrl_data=hsrl_data, spex_data=spex_data)
                 else:
                     fig2 = go.Figure()
                     fig2.add_annotation(
@@ -9088,7 +9205,7 @@ def run_app(initial_file_path, directory_path):
                 )
 
             # Create the property vs time plot
-            single_fig = create_property_vs_time_plot(data_dict, property_name=property_name, mode=mode, max_cost=max_cost, highlight_time_index=highlight_time_index, highlight_y_value=highlight_y_value, threshold_params=threshold_params, hsrl_data=hsrl_data)
+            single_fig = create_property_vs_time_plot(data_dict, property_name=property_name, mode=mode, max_cost=max_cost, highlight_time_index=highlight_time_index, highlight_y_value=highlight_y_value, threshold_params=threshold_params, hsrl_data=hsrl_data, spex_data=spex_data)
             return (
                 {'display': 'block'},
                 {'display': 'none'},

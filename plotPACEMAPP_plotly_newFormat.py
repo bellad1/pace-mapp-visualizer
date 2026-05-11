@@ -5941,6 +5941,7 @@ def run_app(initial_file_path, directory_path):
         dcc.Store(id='clicked-point-store'),
         dcc.Store(id='time-plot-clicked-point-store'),
         dcc.Store(id='applied-cost-value', data=default_cost_value),
+        dcc.Store(id='applied-cost-value-2', data=default_cost_value),
         dcc.Store(id='applied-threshold-value', data=None),
         dcc.Store(id='applied-threshold-value-2', data=None),
 
@@ -5960,267 +5961,315 @@ def run_app(initial_file_path, directory_path):
             # ============================================================
             html.Div([
                 # Controls section
-                html.Div([
+                html.Div(
                     html.H3("Controls", style={
-                        'margin': '0 0 10px 0',
-                        'color': '#34495e',
-                        'fontSize': '18px',
-                        'textDecoration': 'underline',
-                        'display': 'inline-block'
+                        'margin': '0',
+                        'color': 'white',
+                        'fontSize': '20px',
+                        'textAlign': 'center',
+                        'letterSpacing': '1px',
+                    }),
+                    style={
+                        'backgroundColor': '#2c3e50',
+                        'borderRadius': '6px',
+                        'padding': '10px',
+                        'marginBottom': '0px',
+                    }
+                ),
+                html.Div([
+
+                    # === BOX 1: FILE SELECTION ===
+                    html.Div([
+                        html.H4("File Selection", style={
+                            'margin': '0 0 10px 0', 'fontSize': '18px',
+                            'fontWeight': 'bold',
+                            'textDecoration': 'underline'
+                        }),
+
+                        # Universal Analysis Mode
+                        html.Div([
+                            html.Label("Analysis Mode:", style={
+                                'fontWeight': 'bold',
+                                'marginBottom': '5px',
+                                'display': 'block',
+                                'color': '#2c3e50', 'fontSize': '16px',
+                            }),
+                            dcc.RadioItems(
+                                id='individual-analysis-mode',
+                                options=[
+                                    {'label': ' Single File (Measured vs Modeled)', 'value': 'single'},
+                                    {'label': ' Compare Files (File 1 vs File 2)', 'value': 'multiple'}
+                                ],
+                                value='single',
+                                style={'margin': '10px 0'},
+                                labelStyle={'display': 'block', 'margin': '5px 0'}
+                            ),
+                        ]),
+
+                        # File selector
+                        html.Div([
+                            html.Label("Select File:", style={
+                                'fontWeight': 'bold',
+                                'marginBottom': '5px',
+                                'display': 'block',
+                                'color': '#2c3e50', 'fontSize': '16px'
+                            }),
+                            dcc.Dropdown(
+                                id='file-selector',
+                                options=file_options,
+                                value=None,
+                                placeholder="Please select a file...",
+                                style={
+                                    'marginBottom': '10px',
+                                    'fontSize': '12px'
+                                }
+                            ),
+                        ]),
+
+                        # 2nd File selector (conditional on analysis mode)
+                        html.Div([
+                            html.Label("Select Second File:", style={
+                                'fontWeight': 'bold',
+                                'marginBottom': '5px',
+                                'display': 'block',
+                                'color': '#2c3e50', 'fontSize': '16px'
+                            }),
+                            dcc.Dropdown(
+                                id='individual-file-selector-2',
+                                options=file_options,
+                                value=None,
+                                placeholder="Please select a second file...",
+                                style={
+                                    'marginBottom': '5px',
+                                    'fontSize': '12px'
+                                }
+                            ),
+                        ], id='individual-file-2-container', style={'display': 'none'}),
+
+                    ], style={
+                        'backgroundColor': '#f2f3f4', 'border': '1px solid #d5d8dc',
+                        'borderRadius': '6px', 'padding': '10px', 'marginBottom': '12px'
                     }),
 
-                    # Universal Analysis Mode
+                    # === BOX 4: VISUALIZATION OPTIONS ===
                     html.Div([
-                        html.Label("Analysis Mode:", style={
-                            'fontWeight': 'bold',
-                            'marginBottom': '5px',
-                            'display': 'block',
-                            'fontSize': '16px',
+                        html.H4("Visualization Options", style={
+                            'margin': '0 0 10px 0', 'fontSize': '18px',
+                            'fontWeight': 'bold', 'textDecoration': 'underline'
                         }),
-                        dcc.RadioItems(
-                            id='individual-analysis-mode',
-                            options=[
-                                {'label': ' Single File (Measured vs Modeled)', 'value': 'single'},
-                                {'label': ' Compare Files (File 1 vs File 2)', 'value': 'multiple'}
-                            ],
-                            value='single',
-                            style={'margin': '10px 0'},
-                            labelStyle={'display': 'block', 'margin': '5px 0'}
-                        ),
-                    ]),
 
-                    # File selector
-                    html.Div([
-                        html.Label("Select File:", style={
-                            'fontWeight': 'bold',
-                            'marginBottom': '5px',
-                            'display': 'block',
-                            'fontSize': '16px'
-                        }),
-                        dcc.Dropdown(
-                            id='file-selector',
-                            options=file_options,
-                            value=None,
-                            placeholder="Please select a file...",
-                            style={
-                                'marginBottom': '15px',
-                                'fontSize': '12px'
-                            }
-                        ),
-                    ]),
-
-                    # 2nd File selector (conditional on analysis mode)
-                    html.Div([
-                        html.Label("Select Second File:", style={
-                            'fontWeight': 'bold',
-                            'marginBottom': '5px',
-                            'display': 'block',
-                            'fontSize': '16px'
-                        }),
-                        dcc.Dropdown(
-                            id='individual-file-selector-2',
-                            options=file_options,
-                            value=None,
-                            placeholder="Please select a second file...",
-                            style={
-                                'marginBottom': '15px',
-                                'fontSize': '12px'
-                            }
-                        ),
-                    ], id='individual-file-2-container', style={'display': 'none'}),
-
-                    # PLOT TYPE SELECTOR
-                    html.Div([
-                        html.Label("Select Plot Type:", style={
-                            'fontWeight': 'bold',
-                            'marginBottom': '5px',
-                            'display': 'block',
-                            'fontSize': '16px'
-                        }),
-                        dcc.Dropdown(
-                            id='plot-type-selector',
-                            options=[
-                                {'label': 'About the Visualizer', 'value': 'about'},
-                                {'label': 'Scatter + Intensity/DoLP', 'value': 'scatter'},
-                                {'label': 'Polarized Reflectance', 'value': 'polarized'},
-                                {'label': 'Residual Analysis', 'value': 'residual'},
-                                {'label': 'Histogram', 'value': 'histogram'},
-                                {'label': 'AOD Total', 'value': 'aod_total'}
-                            ],
-                            value='about',  # Default to About on startup
-                            style={
-                                'marginBottom': '20px',
-                                'fontSize': '14px'
-                            }
-                        ),
-                    ]),
-
-                    # PLOT-SPECIFIC CONTROLS
-                    # Polarized Reflectance controls
-                    html.Div([
-                        html.Label("Comparison Method:", style={
-                            'fontWeight': 'bold',
-                            'marginBottom': '5px',
-                            'display': 'block',
-                            'fontSize': '14px'
-                        }),
-                        dcc.Dropdown(
-                            id='polarized-difference-type',
-                            options=[
-                                {'label': 'Simple Difference (File1 - File2)', 'value': 'simple'},
-                                {'label': 'Percent Difference ((File1 - File2) / File2 × 100)', 'value': 'percent'}
-                            ],
-                            value='simple',
-                            style={'marginBottom': '15px', 'fontSize': '12px'}
-                        ),
-                    ], id='polarized-controls-container', style={'display': 'none'}),
-
-                    # Residual Analysis controls
-                    html.Div([
-                        html.Label("Residual Type:", style={
-                            'fontWeight': 'bold',
-                            'marginBottom': '5px',
-                            'display': 'block',
-                            'fontSize': '14px'
-                        }),
-                        dcc.Dropdown(
-                            id='residual-type-selector',
-                            options=[
-                                {'label': 'Intensity Residual', 'value': 'intensity'},
-                                {'label': 'DoLP Residual', 'value': 'dolp'},
-                                {'label': 'Both Residuals', 'value': 'both'}
-                            ],
-                            value='both',
-                            style={'marginBottom': '15px', 'fontSize': '12px'}
-                        ),
-                    ], id='residual-controls-container', style={'display': 'none'}),
-
-                    # Retrieval property selectors (Scatter + Intensity/DoLP tab only)
-                    html.Div([
-                        html.Label("Select Retrieval Property:",
-                                   id='property-selector-label',
-                                   style={
-                                       'fontWeight': 'bold',
-                                       'marginBottom': '10px',
-                                       'display': 'block',
-                                       'fontSize': '16px'
-                                   }),
-                        dcc.Dropdown(
-                            id='property-selector',
-                            options=[],
-                            value=None,
-                            placeholder="",
-                            style={
-                                'height': '24px',
-                                'fontSize': '16px'
-                            }
-                        ),
-                    ], id='property-selector-container', style={'display': 'none', 'marginBottom': '50px'}),
-
-                    # File 2 retrieval property selector (Compare Files mode only)
-                    html.Div([
-                        html.Label("File 2 - Retrieval Property:", style={
-                            'fontWeight': 'bold',
-                            'marginBottom': '5px',
-                            'display': 'block',
-                            'fontSize': '16px'
-                        }),
-                        dcc.Dropdown(
-                            id='property-selector-2',
-                            options=[],
-                            value=None,
-                            placeholder="Select file 2 first",
-                            style={
-                                'height': '24px',
-                                'fontSize': '16px'
-                            }
-                        ),
-                    ], id='property-selector-2-container', style={'display': 'none', 'marginTop': '15px', 'marginBottom': '20px'}),
-
-                    # Histogram property selectors (Histogram tab only)
-                    html.Div([
-                        html.Label("Select Retrieval Property:",
-                                   id='hist-property-selector-label',
-                                   style={
-                                       'fontWeight': 'bold',
-                                       'marginBottom': '10px',
-                                       'display': 'block',
-                                       'fontSize': '16px'
-                                   }),
-                        dcc.Dropdown(
-                            id='hist-property-selector',
-                            options=[],
-                            value=None,
-                            placeholder="",
-                            style={
-                                'height': '24px',
-                                'fontSize': '16px'
-                            }
-                        ),
+                        # Plot type selector
                         html.Div([
-                            html.Label("Number of Bins:", style={
+                            html.Label("Select Plot Type:", style={
                                 'fontWeight': 'bold',
-                                'marginRight': '10px',
+                                'marginBottom': '5px',
+                                'display': 'block',
+                                'color': '#2c3e50', 'fontSize': '16px'
+                            }),
+                            dcc.Dropdown(
+                                id='plot-type-selector',
+                                options=[
+                                    {'label': 'About the Visualizer', 'value': 'about'},
+                                    {'label': 'Scatter + Intensity/DoLP', 'value': 'scatter'},
+                                    {'label': 'Polarized Reflectance', 'value': 'polarized'},
+                                    {'label': 'Residual Analysis', 'value': 'residual'},
+                                    {'label': 'Histogram', 'value': 'histogram'},
+                                    {'label': 'AOD Total', 'value': 'aod_total'}
+                                ],
+                                value='about',  # Default to About on startup
+                                style={
+                                    'marginBottom': '12px',
+                                    'fontSize': '14px'
+                                }
+                            ),
+                        ]),
+
+                        # Plot-specific controls (shown/hidden by callbacks)
+                        # Polarized Reflectance controls
+                        html.Div([
+                            html.Label("Comparison Method:", style={
+                                'fontWeight': 'bold',
+                                'marginBottom': '5px',
+                                'display': 'block',
                                 'fontSize': '14px'
                             }),
-                            dcc.Input(
-                                id='hist-bin-count',
-                                type='number',
-                                value=50,
-                                min=5,
-                                max=500,
-                                step=1,
-                                style={'width': '70px', 'fontSize': '14px'}
+                            dcc.Dropdown(
+                                id='polarized-difference-type',
+                                options=[
+                                    {'label': 'Simple Difference (File1 - File2)', 'value': 'simple'},
+                                    {'label': 'Percent Difference ((File1 - File2) / File2 × 100)', 'value': 'percent'}
+                                ],
+                                value='simple',
+                                style={'marginBottom': '15px', 'fontSize': '12px'}
                             ),
-                        ], style={'display': 'flex', 'alignItems': 'center', 'marginTop': '10px'}),
-                    ], id='hist-property-selector-container', style={'display': 'none', 'marginBottom': '20px'}),
+                        ], id='polarized-controls-container', style={'display': 'none'}),
 
-                    # File 2 histogram property selector (Histogram tab, Compare Files mode only)
-                    html.Div([
-                        html.Label("File 2 - Retrieval Property:", style={
-                            'fontWeight': 'bold',
-                            'marginBottom': '5px',
-                            'display': 'block',
-                            'fontSize': '16px'
-                        }),
-                        dcc.Dropdown(
-                            id='hist-property-selector-2',
-                            options=[],
-                            value=None,
-                            placeholder="Select file 2 first",
-                            style={
-                                'height': '24px',
-                                'fontSize': '16px'
-                            }
-                        ),
+                        # Residual Analysis controls
                         html.Div([
-                            html.Label("Number of Bins:", style={
+                            html.Label("Residual Type:", style={
                                 'fontWeight': 'bold',
-                                'marginRight': '10px',
+                                'marginBottom': '5px',
+                                'display': 'block',
                                 'fontSize': '14px'
                             }),
-                            dcc.Input(
-                                id='hist-bin-count-2',
-                                type='number',
-                                value=50,
-                                min=5,
-                                max=500,
-                                step=1,
-                                style={'width': '70px', 'fontSize': '14px'}
+                            dcc.Dropdown(
+                                id='residual-type-selector',
+                                options=[
+                                    {'label': 'Intensity Residual', 'value': 'intensity'},
+                                    {'label': 'DoLP Residual', 'value': 'dolp'},
+                                    {'label': 'Both Residuals', 'value': 'both'}
+                                ],
+                                value='both',
+                                style={'marginBottom': '15px', 'fontSize': '12px'}
                             ),
-                        ], style={'display': 'flex', 'alignItems': 'center', 'marginTop': '10px'}),
-                    ], id='hist-property-selector-2-container', style={'display': 'none', 'marginTop': '15px', 'marginBottom': '20px'}),
+                        ], id='residual-controls-container', style={'display': 'none'}),
 
-                    # Cost selector
+                        # Retrieval property selectors (Scatter + Intensity/DoLP tab only)
+                        html.Div([
+                            html.Label("Select Retrieval Property:",
+                                       id='property-selector-label',
+                                       style={
+                                           'fontWeight': 'bold',
+                                           'marginBottom': '5px',
+                                           'display': 'block',
+                                           'color': '#2c3e50', 'fontSize': '16px'
+                                       }),
+                            dcc.Dropdown(
+                                id='property-selector',
+                                options=[],
+                                value=None,
+                                placeholder="",
+                                style={
+                                    'height': '24px',
+                                    'fontSize': '14px'
+                                }
+                            ),
+                        ], id='property-selector-container', style={'display': 'none', 'marginBottom': '50px'}),
+
+                        # File 2 retrieval property selector (Compare Files mode only)
+                        html.Div([
+                            html.Label("File 2 - Retrieval Property:", style={
+                                'fontWeight': 'bold',
+                                'marginBottom': '5px',
+                                'display': 'block',
+                                'color': '#2c3e50', 'fontSize': '16px'
+                            }),
+                            dcc.Dropdown(
+                                id='property-selector-2',
+                                options=[],
+                                value=None,
+                                placeholder="Select file 2 first",
+                                style={
+                                    'height': '24px',
+                                    'fontSize': '14px'
+                                }
+                            ),
+                        ], id='property-selector-2-container',
+                                 style={
+                                     'display': 'none', 'marginTop': '15px', 'marginBottom': '20px'}),
+
+                        # Histogram property selectors (Histogram tab only)
+                        html.Div([
+                            html.Label("Select Retrieval Property:",
+                                       id='hist-property-selector-label',
+                                       style={
+                                           'fontWeight': 'bold',
+                                           'marginBottom': '10px',
+                                           'display': 'block',
+                                           'fontSize': '16px'
+                                       }),
+                            dcc.Dropdown(
+                                id='hist-property-selector',
+                                options=[],
+                                value=None,
+                                placeholder="",
+                                style={
+                                    'height': '24px',
+                                    'fontSize': '16px'
+                                }
+                            ),
+                            html.Div([
+                                html.Label("Number of Bins:", style={
+                                    'fontWeight': 'bold',
+                                    'marginRight': '10px',
+                                    'fontSize': '14px',
+                                    'color': '#2c3e50'
+                                }),
+                                dcc.Input(
+                                    id='hist-bin-count',
+                                    type='number',
+                                    value=50,
+                                    min=5,
+                                    max=500,
+                                    step=1,
+                                    style={'width': '70px', 'fontSize': '14px'}
+                                ),
+                            ], style={'display': 'flex', 'alignItems': 'center', 'marginTop': '10px'}),
+                        ], id='hist-property-selector-container', style={'display': 'none', 'marginBottom': '20px'}),
+
+                        # File 2 histogram property selector (Histogram tab, Compare Files mode only)
+                        html.Div([
+                            html.Label("File 2 - Retrieval Property:", style={
+                                'fontWeight': 'bold',
+                                'marginBottom': '5px',
+                                'display': 'block',
+                                'fontSize': '16px'
+                            }),
+                            dcc.Dropdown(
+                                id='hist-property-selector-2',
+                                options=[],
+                                value=None,
+                                placeholder="Select file 2 first",
+                                style={
+                                    'height': '24px',
+                                    'fontSize': '16px'
+                                }
+                            ),
+                            html.Div([
+                                html.Label("Number of Bins:", style={
+                                    'fontWeight': 'bold',
+                                    'marginRight': '10px',
+                                    'fontSize': '14px',
+                                    'color': '#2c3e50'
+                                }),
+                                dcc.Input(
+                                    id='hist-bin-count-2',
+                                    type='number',
+                                    value=50,
+                                    min=5,
+                                    max=500,
+                                    step=1,
+                                    style={'width': '70px', 'fontSize': '14px'}
+                                ),
+                            ], style={'display': 'flex', 'alignItems': 'center', 'marginTop': '10px'}),
+                        ], id='hist-property-selector-2-container', style={'display': 'none', 'marginTop': '15px', 'marginBottom': '10px'}),
+
+                    ], style={
+                        'backgroundColor': '#f4ecf7', 'border': '1px solid #d2b4de',
+                        'borderRadius': '6px', 'padding': '10px', 'marginBottom': '12px'
+                    }),
+
+                    # === BOX 2: FILTERING ===
                     html.Div([
-                        html.Label("Cost Filter:",
+                        html.H4("Data Filtering", style={
+                            'margin': '0 0 10px 0', 'fontSize': '18px',
+                            'fontWeight': 'bold',
+                            'textDecoration': 'underline'
+                        }),
+
+                        # -- Cost Filter sub-section --
+                        html.H5("Cost Filter:", style={
+                            'marginBottom': '6px', 'marginTop': '4px',
+                            'color': '#2c3e50', 'fontSize': '16px'
+                        }),
+                        html.Label("",
                                    id='cost-filter-label',
                                    style={
                                       'fontWeight': 'bold',
-                                      'marginBottom': '5px',
-                                      'marginTop': '10px',
+                                      'marginBottom': '4px',
                                       'display': 'block',
-                                      'fontSize': '16px'
+                                      'fontSize': '12px',
+                                      'color': '#555'
                                     }),
                         html.Div([
                             html.Button('-', id='cost-decrement-button', n_clicks=0,
@@ -6231,11 +6280,11 @@ def run_app(initial_file_path, directory_path):
                                 id='cost-input',
                                 type='text',
                                 value=None,
-                                placeholder="Select file first.",
+                                placeholder="Select a file first.",
                                 style={
                                     'width': '45%',
                                     'height': '24px',
-                                    'fontSize': '14px',
+                                    'fontSize': '12px',
                                     'marginRight': '2%',
                                     'textAlign': 'center'
                                 }
@@ -6244,140 +6293,187 @@ def run_app(initial_file_path, directory_path):
                                         style={'width': '8%', 'padding': '8px', 'backgroundColor': '#95a5a6',
                                                'color': 'white', 'border': 'none', 'borderRadius': '4px',
                                                'cursor': 'pointer', 'marginRight': '5%', 'fontWeight': 'bold'}),
-                            html.Button('Apply', id='apply-cost-button', n_clicks=0,
-                                        style={'width': '30%', 'padding': '8px', 'backgroundColor': '#27ae60',
+                            html.Button('Apply Cost', id='apply-cost-button', n_clicks=0,
+                                        style={'width': '30%', 'padding': '8px', 'backgroundColor': '#2980b9',
                                                'color': 'white', 'border': 'none', 'borderRadius': '4px',
                                                'cursor': 'pointer'}),
-                        ], style={'display': 'flex', 'marginBottom': '10px', 'alignItems': 'center'}),
-                        html.Div(id='cost-input-message', style={'fontSize': '12px', 'color': '#7f8c8d'}),
-                    ]),
+                        ], style={'display': 'flex', 'marginBottom': '6px', 'alignItems': 'center'}),
+                        html.Div(id='cost-input-message',
+                                 style={'fontSize': '12px', 'color': '#7f8c8d', 'marginBottom': '4px'}),
 
-                    # Intensity Residual Threshold Filter (RSP only)
-                    html.Div([
-                        html.Label("Intensity Residual Filter (RSP Only):",
-                                   style={
-                                       'fontWeight': 'bold',
-                                       'marginBottom': '8px',
-                                       'marginTop': '2px',
-                                       'display': 'block',
-                                       'fontSize': '16px'
-                                   }),
-                        html.P("Filter pixels where fewer than the required % of views "
-                               "have |measured − modeled| / measured within the residual threshold.",
-                               style={'fontSize': '12px', 'color': '#7f8c8d', 'marginBottom': '8px'}),
-                        # File 1 threshold controls
+                        html.Hr(id='cost-file-2-divider',
+                                style={'display': 'none', 'borderColor': '#bdc3c7', 'margin': '6px 0'}),
+
+                        # File 2 cost section (shown only in Compare Files mode with File 2 selected)
                         html.Div([
-                            html.Label("Wavelength:", style={'fontSize': '13px', 'marginBottom': '3px', 'display': 'block'}),
-                            dcc.Dropdown(
-                                id='threshold-wavelength-selector',
-                                options=[],
-                                value=None,
-                                placeholder="Select wavelength",
-                                clearable=False,
-                                style={'marginBottom': '8px', 'fontSize': '13px'}
-                            ),
+                            html.Label("", id='cost-filter-label-2', style={
+                                'fontWeight': 'bold', 'marginBottom': '4px',
+                                'display': 'block', 'fontSize': '12px', 'color': '#555'
+                            }),
                             html.Div([
-                                html.Div([
-                                    html.Label("Min. Views Within Threshold (%):",
-                                               style={'fontSize': '13px', 'marginBottom': '3px', 'display': 'block'}),
-                                    dcc.Input(
-                                        id='threshold-pct-views',
-                                        type='number',
-                                        value=0,
-                                        min=0,
-                                        max=100,
-                                        step=1,
-                                        style={'width': '80px', 'fontSize': '13px', 'textAlign': 'center'}
-                                    ),
-                                ], style={'marginRight': '15px'}),
-                                html.Div([
-                                    html.Label("Residual Threshold (%):",
-                                               style={'fontSize': '13px', 'marginBottom': '3px', 'display': 'block'}),
-                                    dcc.Input(
-                                        id='threshold-residual-pct',
-                                        type='number',
-                                        value=1.0,
-                                        min=0,
-                                        step=0.1,
-                                        style={'width': '80px', 'fontSize': '13px', 'textAlign': 'center'}
-                                    ),
-                                ]),
-                            ], style={'display': 'flex', 'alignItems': 'flex-start', 'marginBottom': '8px'}),
-                            html.Button('Apply Threshold', id='apply-threshold-button', n_clicks=0,
-                                        style={'width': '100%', 'padding': '8px', 'backgroundColor': '#2980b9',
-                                               'color': 'white', 'border': 'none', 'borderRadius': '4px',
-                                               'cursor': 'pointer', 'marginBottom': '5px'}),
-                            html.Div(id='threshold-message',
-                                     style={'fontSize': '12px', 'color': '#7f8c8d', 'marginBottom': '8px'}),
-                        ]),
-                        # File 2 threshold controls (Compare Files + RSP file 2 only)
+                                html.Button('-', id='cost-decrement-button-2', n_clicks=0,
+                                            style={'width': '8%', 'padding': '8px', 'backgroundColor': '#95a5a6',
+                                                   'color': 'white', 'border': 'none', 'borderRadius': '4px',
+                                                   'cursor': 'pointer', 'marginRight': '2%', 'fontWeight': 'bold'}),
+                                dcc.Input(
+                                    id='cost-input-2',
+                                    type='text',
+                                    value=None,
+                                    placeholder="Select file 2 first.",
+                                    style={
+                                        'width': '45%',
+                                        'height': '24px',
+                                        'fontSize': '12px',
+                                        'marginRight': '2%',
+                                        'textAlign': 'center'
+                                    }
+                                ),
+                                html.Button('+', id='cost-increment-button-2', n_clicks=0,
+                                            style={'width': '8%', 'padding': '8px', 'backgroundColor': '#95a5a6',
+                                                   'color': 'white', 'border': 'none', 'borderRadius': '4px',
+                                                   'cursor': 'pointer', 'marginRight': '5%', 'fontWeight': 'bold'}),
+                                html.Button('Apply Cost (File 2)', id='apply-cost-button-2', n_clicks=0,
+                                            style={'width': '30%', 'padding': '8px', 'backgroundColor': '#8e44ad',
+                                                   'color': 'white', 'border': 'none', 'borderRadius': '4px',
+                                                   'cursor': 'pointer'}),
+                            ], style={'display': 'flex', 'marginBottom': '6px', 'alignItems': 'center'}),
+                            html.Div(id='cost-input-message-2', style={'fontSize': '12px', 'color': '#7f8c8d', 'marginBottom': '4px'}),
+                        ], id='cost-filter-file-2-container', style={'display': 'none', 'marginTop': '4px'}),
+
+                        html.Hr(id='cost-threshold-divider',
+                                style={'display': 'none', 'borderColor': '#7fb3d3',
+                                       'borderWidth': '2px', 'margin': '10px 0'}),
+
+                        # -- Intensity Residual Filter sub-section --
                         html.Div([
-                            html.Hr(style={'borderColor': '#bdc3c7', 'margin': '8px 0'}),
-                            html.Label("File 2 – Intensity Residual Filter:",
-                                       style={'fontSize': '13px', 'fontWeight': 'bold',
-                                              'marginBottom': '5px', 'display': 'block'}),
-                            dcc.Dropdown(
-                                id='threshold-wavelength-selector-2',
-                                options=[],
-                                value=None,
-                                placeholder="Select wavelength",
-                                clearable=False,
-                                style={'marginBottom': '8px', 'fontSize': '13px'}
-                            ),
+                            html.Label("Intensity Residual Filter (RSP Only):",
+                                       style={
+                                           'fontWeight': 'bold',
+                                           'marginBottom': '0px',
+                                           'marginTop': '5px',
+                                           'display': 'block',
+                                           'color': '#2c3e50', 'fontSize': '16px'
+                                       }),
+                            html.P("Filter pixels where fewer than the required % of views "
+                                   "have |measured − modeled| / measured within the residual threshold.",
+                                   style={'fontSize': '12px', 'color': '#7f8c8d', 'marginBottom': '8px',
+                                          'marginTop': '0px'}),
+                            # File 1 threshold controls
                             html.Div([
+                                html.Label("Wavelength:", style={'fontSize': '13px', 'marginBottom': '3px', 'display': 'block'}),
+                                dcc.Dropdown(
+                                    id='threshold-wavelength-selector',
+                                    options=[],
+                                    value=None,
+                                    placeholder="Select wavelength",
+                                    clearable=False,
+                                    style={'marginBottom': '8px', 'fontSize': '12px'}
+                                ),
                                 html.Div([
-                                    html.Label("Min. Views Within Threshold (%):",
-                                               style={'fontSize': '13px', 'marginBottom': '3px', 'display': 'block'}),
-                                    dcc.Input(
-                                        id='threshold-pct-views-2',
-                                        type='number',
-                                        value=0,
-                                        min=0,
-                                        max=100,
-                                        step=1,
-                                        style={'width': '80px', 'fontSize': '13px', 'textAlign': 'center'}
-                                    ),
-                                ], style={'marginRight': '15px'}),
+                                    html.Div([
+                                        html.Label("Min. Views Within Threshold (%):",
+                                                   style={'fontSize': '13px', 'marginBottom': '3px', 'display': 'block'}),
+                                        dcc.Input(
+                                            id='threshold-pct-views',
+                                            type='number',
+                                            value=0,
+                                            min=0,
+                                            max=100,
+                                            step=1,
+                                            style={'width': '80px', 'fontSize': '12px', 'textAlign': 'center'}
+                                        ),
+                                    ], style={'marginRight': '15px'}),
+                                    html.Div([
+                                        html.Label("Residual Threshold (%):",
+                                                   style={'fontSize': '13px', 'marginBottom': '3px', 'display': 'block'}),
+                                        dcc.Input(
+                                            id='threshold-residual-pct',
+                                            type='number',
+                                            value=1.0,
+                                            min=0,
+                                            step=0.1,
+                                            style={'width': '80px', 'fontSize': '12px', 'textAlign': 'center'}
+                                        ),
+                                    ]),
+                                ], style={'display': 'flex', 'alignItems': 'flex-start', 'marginBottom': '8px'}),
+                                html.Button('Apply Threshold', id='apply-threshold-button', n_clicks=0,
+                                            style={'width': '100%', 'padding': '8px', 'backgroundColor': '#2980b9',
+                                                   'color': 'white', 'border': 'none', 'borderRadius': '4px',
+                                                   'cursor': 'pointer', 'marginBottom': '5px'}),
+                                html.Div(id='threshold-message',
+                                         style={'fontSize': '12px', 'color': '#7f8c8d', 'marginBottom': '8px'}),
+                            ]),
+                            # File 2 threshold controls (Compare Files + RSP file 2 only)
+                            html.Div([
+                                html.Hr(style={'borderColor': '#bdc3c7', 'margin': '8px 0'}),
+                                html.Label("Wavelength (File 2):", style={'fontSize': '13px', 'marginBottom': '3px', 'display': 'block'}),
+                                # html.Label("File 2 – Intensity Residual Filter:",
+                                #           style={'fontSize': '13px', 'fontWeight': 'bold',
+                                #                  'marginBottom': '5px', 'display': 'block'}),
+                                dcc.Dropdown(
+                                    id='threshold-wavelength-selector-2',
+                                    options=[],
+                                    value=None,
+                                    placeholder="Select wavelength",
+                                    clearable=False,
+                                    style={'marginBottom': '8px', 'fontSize': '12px'}
+                                ),
                                 html.Div([
-                                    html.Label("Residual Threshold (%):",
-                                               style={'fontSize': '13px', 'marginBottom': '3px', 'display': 'block'}),
-                                    dcc.Input(
-                                        id='threshold-residual-pct-2',
-                                        type='number',
-                                        value=1.0,
-                                        min=0,
-                                        step=0.1,
-                                        style={'width': '80px', 'fontSize': '13px', 'textAlign': 'center'}
-                                    ),
-                                ]),
-                            ], style={'display': 'flex', 'alignItems': 'flex-start', 'marginBottom': '8px'}),
-                            html.Button('Apply Threshold (File 2)', id='apply-threshold-button-2', n_clicks=0,
-                                        style={'width': '100%', 'padding': '8px', 'backgroundColor': '#8e44ad',
-                                               'color': 'white', 'border': 'none', 'borderRadius': '4px',
-                                               'cursor': 'pointer', 'marginBottom': '5px'}),
-                            html.Div(id='threshold-message-2',
-                                     style={'fontSize': '12px', 'color': '#7f8c8d', 'marginBottom': '4px'}),
-                        ], id='threshold-file-2-section', style={'display': 'none'}),
-                    ], id='threshold-filter-container',
-                       style={'display': 'none', 'marginBottom': '6px',
-                              'padding': '10px', 'backgroundColor': '#eaf4fb',
-                              'borderRadius': '6px', 'border': '1px solid #aed6f1'}),
+                                    html.Div([
+                                        html.Label("Min. Views Within Threshold (%):",
+                                                   style={'fontSize': '13px', 'marginBottom': '3px', 'display': 'block'}),
+                                        dcc.Input(
+                                            id='threshold-pct-views-2',
+                                            type='number',
+                                            value=0,
+                                            min=0,
+                                            max=100,
+                                            step=1,
+                                            style={'width': '80px', 'fontSize': '12px', 'textAlign': 'center'}
+                                        ),
+                                    ], style={'marginRight': '15px'}),
+                                    html.Div([
+                                        html.Label("Residual Threshold (%):",
+                                                   style={'fontSize': '13px', 'marginBottom': '3px', 'display': 'block'}),
+                                        dcc.Input(
+                                            id='threshold-residual-pct-2',
+                                            type='number',
+                                            value=1.0,
+                                            min=0,
+                                            step=0.1,
+                                            style={'width': '80px', 'fontSize': '12px', 'textAlign': 'center'}
+                                        ),
+                                    ]),
+                                ], style={'display': 'flex', 'alignItems': 'flex-start', 'marginBottom': '8px'}),
+                                html.Button('Apply Threshold (File 2)', id='apply-threshold-button-2', n_clicks=0,
+                                            style={'width': '100%', 'padding': '8px', 'backgroundColor': '#8e44ad',
+                                                   'color': 'white', 'border': 'none', 'borderRadius': '4px',
+                                                   'cursor': 'pointer', 'marginBottom': '5px'}),
+                                html.Div(id='threshold-message-2',
+                                         style={'fontSize': '12px', 'color': '#7f8c8d', 'marginBottom': '4px'}),
+                            ], id='threshold-file-2-section', style={'display': 'none'}),
+                        ], id='threshold-filter-container', style={'display': 'none'}),
 
-                    # Filter stats — shown below the threshold box for all files/modes
-                    html.Div(id='filter-stats-display',
-                             style={'fontSize': '12px', 'color': '#555',
-                                    'marginBottom': '4px', 'marginTop': '2px'}),
-                    html.Div(id='filter-stats-display-2',
-                             style={'fontSize': '12px', 'color': '#555',
-                                    'marginBottom': '18px', 'marginTop': '2px'}),
+                        # Unified filter stats table (bottom of Filtering box)
+                        html.Div(id='filter-stats-table', style={'marginTop': '10px'}),
 
-                    # Lat/Lon inputs
+                    ], style={
+                        'backgroundColor': '#eaf4fb', 'border': '1px solid #aed6f1',
+                        'borderRadius': '6px', 'padding': '10px', 'marginBottom': '12px'
+                    }),
+
+                    # === BOX 3: FIND POINT ===
                     html.Div([
-                        html.Label("Enter Coordinates (optional):", style={
+                        html.H4("Find Point (optional)", style={
+                            'margin': '0 0 10px 0', 'fontSize': '18px',
+                            'fontWeight': 'bold',
+                            'textDecoration': 'underline'
+                        }),
+                        html.Label("Enter Coordinates:", style={
                             'fontWeight': 'bold',
                             'marginBottom': '5px',
                             'display': 'block',
-                            'fontSize': '16px'
+                            'fontSize': '16px', 'color': '#2c3e50'
                         }),
                         html.Div([
                             dcc.Input(
@@ -6407,22 +6503,23 @@ def run_app(initial_file_path, directory_path):
                             ),
                         ], style={'display': 'flex', 'marginBottom': '10px'}),
                         html.Button('Find Closest Point', id='find-point-button', n_clicks=0,
-                                    style={'width': '100%', 'padding': '8px', 'backgroundColor': '#3498db',
+                                    style={'width': '100%', 'padding': '8px', 'backgroundColor': '#27ae60',
                                            'color': 'white', 'border': 'none', 'borderRadius': '4px',
-                                           'cursor': 'pointer', 'marginBottom': '15px'}),
-                    ]),
+                                           'cursor': 'pointer', 'marginBottom': '5px'}),
+                    ], style={
+                        'backgroundColor': '#eafaf1', 'border': '1px solid #a9dfbf',
+                        'borderRadius': '6px', 'padding': '10px', 'marginBottom': '12px'
+                    }),
 
-                    # Export buttons
+                    # Export buttons (hidden)
                     html.Div([
                         html.Button('Export PNG', id='export-button', n_clicks=0,
                                     style={'width': '48%', 'marginRight': '4%', 'padding': '10px',
                                            'backgroundColor': '#e74c3c', 'color': 'white', 'border': 'none',
-                                           # 'borderRadius': '4px', 'cursor': 'pointer'}),
                                            'borderRadius': '4px', 'cursor': 'pointer', 'display': 'none'}),
                         html.Button('Export KML', id='export-kml-button', n_clicks=0,
                                     style={'width': '48%', 'padding': '10px', 'backgroundColor': '#9b59b6',
                                            'color': 'white', 'border': 'none', 'borderRadius': '4px',
-                                           # 'cursor': 'pointer'}),
                                            'cursor': 'pointer', 'display': 'none'}),
                     ], style={'display': 'flex', 'marginBottom': '5px'}),
 
@@ -7581,26 +7678,33 @@ def run_app(initial_file_path, directory_path):
         is_histogram = (plot_type == 'histogram')
         is_multi = (analysis_mode == 'multiple')
 
-        # Polarized controls: show only for polarized plot AND when in compare mode
+        # Polarized controls:
+        # show only for polarized plot AND when in compare mode
         polarized_style = {'display': 'block'} if (plot_type == 'polarized' and is_multi) else {'display': 'none'}
 
-        # Residual controls: show only for residual plot
+        # Residual controls:
+        # show only for residual plot
         residual_style = {'display': 'block'} if plot_type == 'residual' else {'display': 'none'}
 
-        # Property selector: visible on Scatter tab only
+        # Property selector:
+        # visible on Scatter tab only
         # marginBottom controls space between this and the next element (File 2 selector or Cost Filter)
         prop_style = {'display': 'block', 'marginBottom': '20px'} if is_scatter else {'display': 'none'}
 
-        # File 2 property selector: visible on Scatter tab in Compare Files mode only
+        # File 2 property selector:
+        # visible on Scatter tab in Compare Files mode only
         prop2_style = {'display': 'block', 'marginTop': '15px', 'marginBottom': '20px'} if (is_scatter and is_multi) else {'display': 'none'}
 
-        # Scatter label: distinguish single vs. compare files
+        # Scatter label:
+        # distinguish single vs. compare files
         prop_label = "File 1 - Retrieval Property:" if (is_scatter and is_multi) else "Select Retrieval Property:"
 
-        # Histogram property selector: visible on Histogram tab only
+        # Histogram property selector:
+        # visible on Histogram tab only
         hist_style = {'display': 'block', 'marginBottom': '20px'} if is_histogram else {'display': 'none'}
 
-        # File 2 histogram property selector: visible on Histogram tab in Compare Files mode only
+        # File 2 histogram property selector:
+        # visible on Histogram tab in Compare Files mode only
         hist2_style = {'display': 'block', 'marginTop': '15px', 'marginBottom': '20px'} if (is_histogram and is_multi) else {'display': 'none'}
 
         # Histogram label: distinguish single vs. compare files
@@ -7645,6 +7749,7 @@ def run_app(initial_file_path, directory_path):
          Input('property-selector', 'value'),
          Input('property-selector-2', 'value'),
          Input('applied-cost-value', 'data'),
+         Input('applied-cost-value-2', 'data'),
          Input('applied-threshold-value', 'data'),
          Input('applied-threshold-value-2', 'data'),
          # Input('multi-file-clicked-point', 'data')],
@@ -7655,7 +7760,7 @@ def run_app(initial_file_path, directory_path):
         prevent_initial_call=True
     )
     def update_scatter_multi(analysis_mode, file_path_1, file_path_2, selected_property, selected_property_2,
-                             max_cost, threshold_params, threshold_params_2,
+                             max_cost, max_cost_2, threshold_params, threshold_params_2,
                              clickData, find_button_clicks, input_lat, input_lon):
         from dash import callback_context
         print("Doing callback: update_scatter_multi")
@@ -7734,7 +7839,7 @@ def run_app(initial_file_path, directory_path):
             # Filter data by cost then intensity threshold for both files
             filtered_data_1, original_indices_1 = filter_by_cost(data_dict_1, max_cost)
             filtered_data_1 = apply_threshold_if_needed(filtered_data_1, threshold_params)
-            filtered_data_2, original_indices_2 = filter_by_cost(data_dict_2, max_cost)
+            filtered_data_2, original_indices_2 = filter_by_cost(data_dict_2, max_cost_2)
             filtered_data_2 = apply_threshold_if_needed(filtered_data_2, threshold_params_2)
 
             # Initialize click-related variables
@@ -8097,7 +8202,7 @@ def run_app(initial_file_path, directory_path):
 
             # Create scatter plots (using clicked_data or None)
             scatter_fig_1 = create_scatter_plot_only(filtered_data_1, selected_property, original_indices_1, clicked_data_1, max_cost)
-            scatter_fig_2 = create_scatter_plot_only(filtered_data_2, selected_property_2, original_indices_2, clicked_data_2, max_cost)
+            scatter_fig_2 = create_scatter_plot_only(filtered_data_2, selected_property_2, original_indices_2, clicked_data_2, max_cost_2)
 
             # Create intensity/dolp/polarized plots
             if file1_row is not None and file2_row is not None:
@@ -8193,6 +8298,7 @@ def run_app(initial_file_path, directory_path):
          Input('individual-file-selector-2', 'value'),
          Input('property-selector', 'value'),
          Input('applied-cost-value', 'data'),
+         Input('applied-cost-value-2', 'data'),
          Input('applied-threshold-value', 'data'),
          Input('applied-threshold-value-2', 'data'),
          Input('plot-type-selector', 'value'),
@@ -8200,7 +8306,7 @@ def run_app(initial_file_path, directory_path):
         prevent_initial_call=True
     )
     def update_image_swath_comparison(analysis_mode, file_path_1, file_path_2,
-                                      selected_property, max_cost,
+                                      selected_property, max_cost, max_cost_2,
                                       threshold_params, threshold_params_2,
                                       plot_type, clickData):
         """
@@ -8295,9 +8401,11 @@ def run_app(initial_file_path, directory_path):
             rsp_data_thresholded = apply_threshold_if_needed(rsp_data_full, rsp_threshold_params)
 
             # Filter both datasets by cost independently; combine with threshold for RSP
-            rsp_cost_mask = ((rsp_data_full['cost_function'].flatten() <= max_cost) &
+            rsp_max_cost = max_cost if file_types['rsp_file'] == 1 else max_cost_2
+            pace_max_cost = max_cost_2 if file_types['rsp_file'] == 1 else max_cost
+            rsp_cost_mask = ((rsp_data_full['cost_function'].flatten() <= rsp_max_cost) &
                              np.isfinite(rsp_data_thresholded['latitude'].flatten()))
-            pace_cost_mask = pace_data_full['cost_function'].flatten() <= max_cost
+            pace_cost_mask = pace_data_full['cost_function'].flatten() <= pace_max_cost
 
             # Get original shapes for reshaping
             rsp_shape = rsp_data_full['original_shape']
@@ -8610,6 +8718,7 @@ def run_app(initial_file_path, directory_path):
          Input('file-selector', 'value'),
          Input('individual-file-selector-2', 'value'),
          Input('applied-cost-value', 'data'),
+         Input('applied-cost-value-2', 'data'),
          Input('applied-threshold-value', 'data'),
          Input('applied-threshold-value-2', 'data'),
          Input('plot-type-selector', 'value'),
@@ -8622,7 +8731,7 @@ def run_app(initial_file_path, directory_path):
         prevent_initial_call=True
     )
     def update_solar_geometry(analysis_mode, file_path_1, file_path_2,
-                              max_cost, threshold_params, threshold_params_2,
+                              max_cost, max_cost_2, threshold_params, threshold_params_2,
                               plot_type, x_axis_type,
                               click_multi, click_single, find_button_clicks,
                               input_lat, input_lon):
@@ -8876,7 +8985,7 @@ def run_app(initial_file_path, directory_path):
             if file_path_2:
                 cached_2 = get_cached_data(file_path_2)
                 data_dict_2 = cached_2['data_dict']
-                filtered_2, _ = filter_by_cost(data_dict_2, max_cost)
+                filtered_2, _ = filter_by_cost(data_dict_2, max_cost_2)
                 filtered_2 = apply_threshold_if_needed(filtered_2, threshold_params_2)
                 color_values_2, color_label_2 = compute_scattering_angle_values(filtered_2, x_axis_type)
 
@@ -9170,6 +9279,7 @@ def run_app(initial_file_path, directory_path):
          Input('plot-type-selector', 'value'),
          Input('property-time-selector', 'value'),
          Input('applied-cost-value', 'data'),
+         Input('applied-cost-value-2', 'data'),
          Input('applied-threshold-value', 'data'),
          Input('applied-threshold-value-2', 'data'),
          Input('time-plot-clicked-point-store', 'data'),
@@ -9178,7 +9288,7 @@ def run_app(initial_file_path, directory_path):
         prevent_initial_call=True
     )
     def update_aod_time_plots(file_path_1, file_path_2, analysis_mode, active_tab, selected_property,
-                              max_cost, threshold_params, threshold_params_2, clicked_point_data,
+                              max_cost, max_cost_2, threshold_params, threshold_params_2, clicked_point_data,
                               hsrl_file_path, spex_file_paths):
         print(f"Doing callback: update_aod_time_plots with property={selected_property}")
         """
@@ -9300,7 +9410,7 @@ def run_app(initial_file_path, directory_path):
                     # Only highlight if this plot was clicked
                     highlight_idx_2 = highlight_time_index if (clicked_point_data and clicked_point_data.get('source_plot') == 'plot-2') else None
                     highlight_y_2 = highlight_y_value if (clicked_point_data and clicked_point_data.get('source_plot') == 'plot-2') else None
-                    fig2 = create_property_vs_time_plot(data_dict_2, property_name=property_name, mode=mode, title_suffix=f"File 2: {filename2}", max_cost=max_cost, highlight_time_index=highlight_idx_2, highlight_y_value=highlight_y_2, threshold_params=threshold_params_2, hsrl_data=hsrl_data, spex_data=spex_data)
+                    fig2 = create_property_vs_time_plot(data_dict_2, property_name=property_name, mode=mode, title_suffix=f"File 2: {filename2}", max_cost=max_cost_2, highlight_time_index=highlight_idx_2, highlight_y_value=highlight_y_2, threshold_params=threshold_params_2, hsrl_data=hsrl_data, spex_data=spex_data)
                 else:
                     fig2 = go.Figure()
                     fig2.add_annotation(
@@ -9640,6 +9750,7 @@ def run_app(initial_file_path, directory_path):
        Input('hist-bin-count', 'value'),
        Input('hist-bin-count-2', 'value'),
        Input('applied-cost-value', 'data'),
+       Input('applied-cost-value-2', 'data'),
        Input('applied-threshold-value', 'data'),
        Input('applied-threshold-value-2', 'data'),
        Input('current-file-data', 'data'),
@@ -9648,7 +9759,7 @@ def run_app(initial_file_path, directory_path):
       prevent_initial_call=True
       )
     def update_histogram(selected_property, selected_property_2, n_bins, n_bins_2,
-                         max_cost, threshold_params, threshold_params_2,
+                         max_cost, max_cost_2, threshold_params, threshold_params_2,
                          current_file_data, analysis_mode, file_path_2):
         """
         Update histogram based on selected property, bin count, and cost threshold.
@@ -9714,7 +9825,7 @@ def run_app(initial_file_path, directory_path):
                     n_bins=n_bins, color='steelblue', threshold_params=threshold_params
                 )
                 fig2 = create_property_histogram(
-                    data_dict_2, selected_property_2, max_cost,
+                    data_dict_2, selected_property_2, max_cost_2,
                     n_bins=n_bins_2, color='firebrick', threshold_params=threshold_params_2
                 )
 
@@ -10058,7 +10169,11 @@ def run_app(initial_file_path, directory_path):
          Output('clicked-point-store', 'data'),
          Output('applied-cost-value', 'data'),
          Output('cost-filter-label', 'children'),
-         Output('plot-type-selector', 'value')],
+         Output('plot-type-selector', 'value'),
+         Output('cost-input-2', 'max'),
+         Output('cost-input-2', 'value'),
+         Output('applied-cost-value-2', 'data', allow_duplicate=True),
+         Output('cost-filter-label-2', 'children')],
         [Input('file-selector', 'value'),
          Input('individual-analysis-mode', 'value'),
          Input('individual-file-selector-2', 'value')],
@@ -10067,22 +10182,40 @@ def run_app(initial_file_path, directory_path):
     def load_and_process_data(selected_file_path, analysis_mode, selected_file_path_2):
         print("Doing callback: load_and_process_data")
 
-        # Handle case where no file is selected
+        # --- File 2 cost info (computed regardless of whether File 1 is set) ---
+        f2_max = 1.0
+        f2_val = None
+        f2_applied = None
+        f2_label = "File 2:"
+        if selected_file_path_2:
+            try:
+                data_dict_2, _, _, _ = load_retrieval_file(selected_file_path_2)
+                f2_max_cost = float(np.nanmax(data_dict_2['cost_function']))
+                f2_min_cost = float(np.nanmin(data_dict_2['cost_function']))
+                f2_val = max(f2_min_cost, min(default_cost, f2_max_cost))
+                f2_max = f2_max_cost
+                f2_applied = f2_val
+                f2_label = f"File 2 (Default={default_cost:.2f}/Range=[{f2_min_cost:.3f}, {f2_max_cost:.3f}]):"
+            except Exception as e:
+                print(f"Warning: could not load File 2 cost info: {e}")
+
+        # Handle case where no file 1 is selected
         if selected_file_path is None:
             print("No file selected, returning empty values")
             return (
-                [],  # empty property options
+                [],    # empty property options
                 None,  # no default property
-                {'file_path': None, 'max_cost_value': 1.0, 'default_var': None},  # store data
-                1.0,  # cost max
-                None,  # cost value
+                {'file_path': None, 'max_cost_value': 1.0, 'default_var': None},
+                1.0,   # cost-input.max
+                None,  # cost-input.value
                 None,  # clicked point
-                None,  # applied cost value
-                "Cost Filter (Please select a file first):",  # label
-                'about'  # plot-type-selector: stay on About page
+                None,  # applied-cost-value
+                "",    # cost-filter-label
+                'about',
+                f2_max, f2_val, f2_applied, f2_label,
             )
 
-        # Read new file
+        # Read File 1
         try:
             print(f"selected_file_path = {selected_file_path}")
             new_data_dict, new_sorted_variables, new_display_names, new_variable_metadata = load_retrieval_file(selected_file_path)
@@ -10117,17 +10250,6 @@ def run_app(initial_file_path, directory_path):
                 'wavelengths': new_wavelengths
             }
 
-            # Reset clicked point data when changing files
-            # return (
-            #     new_dropdown_options,
-            #     new_default_var,
-            #     new_file_data,
-            #     # new_max_cost_value,
-            #     min(default_cost, new_max_cost_value),
-            #     # new_max_cost_value,
-            #     new_default_cost_value,
-            #     None
-            # )
             return (
                 new_dropdown_options,
                 new_default_var,
@@ -10136,14 +10258,14 @@ def run_app(initial_file_path, directory_path):
                 new_default_cost_value,
                 None,
                 new_default_cost_value,
-                f"Cost Filter (Default={default_cost:.2f}/Range=[{new_min_cost_value:.3f}, {new_max_cost_value:.3f}]):",
-                no_update  # stay on current tab
+                f"File 1 (Default={default_cost:.2f}/Range=[{new_min_cost_value:.3f}, {new_max_cost_value:.3f}]):",
+                no_update,  # stay on current tab
+                f2_max, f2_val, f2_applied, f2_label,
             )
 
         except Exception as e:
             import dash
             print(f"Error loading file {selected_file_path}: {str(e)}")
-            # If error, return current values
             raise dash.exceptions.PreventUpdate
 
     # ---------------------------------------------------
@@ -10330,6 +10452,83 @@ def run_app(initial_file_path, directory_path):
         return input_value, f"Using cost threshold: {input_value:.3f}", input_value
 
     # ---------------------------------------------------
+    # FILE 2 COST FILTER CALLBACKS
+    # ---------------------------------------------------
+    @app.callback(
+        [Output('cost-filter-file-2-container', 'style'),
+         Output('cost-file-2-divider', 'style')],
+        Input('individual-file-selector-2', 'value'),
+        Input('individual-analysis-mode', 'value'),
+    )
+    def toggle_cost_filter_2(file_path_2, analysis_mode):
+        if analysis_mode == 'multiple' and file_path_2:
+            return {'display': 'block', 'marginTop': '4px'}, {'display': 'block', 'borderColor': '#bdc3c7', 'margin': '6px 0'}
+        return {'display': 'none'}, {'display': 'none'}
+
+    @app.callback(
+        Output('cost-input-2', 'value', allow_duplicate=True),
+        [Input('cost-increment-button-2', 'n_clicks'),
+         Input('cost-decrement-button-2', 'n_clicks')],
+        [State('cost-input-2', 'value'),
+         State('individual-file-selector-2', 'value')],
+        prevent_initial_call=True
+    )
+    def increment_decrement_cost_2(inc_clicks, dec_clicks, current_value, file_path_2):
+        from dash import callback_context
+        if not callback_context.triggered:
+            return no_update
+        button_id = callback_context.triggered[0]['prop_id'].split('.')[0]
+        max_cost_value = 200.0
+        if file_path_2:
+            cached = get_cached_data(file_path_2)
+            if cached:
+                max_cost_value = cached.get('max_cost_value', 10.0)
+        if current_value is None:
+            current_value = min(default_cost, max_cost_value)
+        if button_id == 'cost-increment-button-2':
+            new_value = current_value + 0.01
+        elif button_id == 'cost-decrement-button-2':
+            new_value = current_value - 0.01
+        else:
+            return no_update
+        new_value = round(new_value, 3)
+        new_value = max(0, min(new_value, max_cost_value))
+        return new_value
+
+    @app.callback(
+        [Output('cost-input-2', 'value', allow_duplicate=True),
+         Output('cost-input-message-2', 'children'),
+         Output('applied-cost-value-2', 'data', allow_duplicate=True)],
+        [Input('apply-cost-button-2', 'n_clicks')],
+        [State('cost-input-2', 'value'),
+         State('individual-file-selector-2', 'value')],
+        prevent_initial_call=True
+    )
+    def validate_cost_input_2(n_clicks, input_value, file_path_2):
+        print("Doing callback: validate_cost_input_2")
+        if n_clicks == 0:
+            return no_update, "", no_update
+        max_cost_value = 200.0
+        if file_path_2:
+            cached = get_cached_data(file_path_2)
+            if cached:
+                max_cost_value = cached.get('max_cost_value', 10.0)
+        if input_value is None or input_value == "":
+            default_val = min(default_cost, max_cost_value)
+            return default_val, f"Using default cost value ({default_cost})", default_val
+        try:
+            if isinstance(input_value, str):
+                input_value = float(input_value)
+        except (ValueError, TypeError):
+            default_val = min(default_cost, max_cost_value)
+            return default_val, f"Invalid input. Using default cost value ({default_cost})", default_val
+        if input_value < 0:
+            return 0, "Input was less than 0. Using minimum value (0).", 0
+        if input_value > max_cost_value:
+            return max_cost_value, f"Input exceeded maximum. Using maximum value ({max_cost_value:.2f}).", max_cost_value
+        return input_value, f"Using cost threshold: {input_value:.3f}", input_value
+
+    # ---------------------------------------------------
     # INTENSITY RESIDUAL THRESHOLD CALLBACKS
     # ---------------------------------------------------
 
@@ -10337,7 +10536,8 @@ def run_app(initial_file_path, directory_path):
         [Output('threshold-wavelength-selector', 'options'),
          Output('threshold-wavelength-selector', 'value'),
          Output('threshold-filter-container', 'style'),
-         Output('applied-threshold-value', 'data', allow_duplicate=True)],
+         Output('applied-threshold-value', 'data', allow_duplicate=True),
+         Output('cost-threshold-divider', 'style')],
         [Input('current-file-data', 'data')],
         prevent_initial_call=True
     )
@@ -10345,15 +10545,16 @@ def run_app(initial_file_path, directory_path):
         """Show threshold filter and populate wavelengths when an RSP file is loaded."""
         print("Doing callback: populate_threshold_controls")
         hidden = {'display': 'none'}
-        visible = {'display': 'block', 'marginBottom': '20px', 'padding': '10px',
-                   'backgroundColor': '#eaf4fb', 'borderRadius': '6px', 'border': '1px solid #aed6f1'}
+        visible = {'display': 'block', 'marginTop': '4px'}
+        divider_hidden = {'display': 'none'}
+        divider_visible = {'display': 'block', 'borderColor': '#7fb3d3', 'borderWidth': '5px', 'margin': '10px 0'}
         if not current_file_data or not current_file_data.get('is_rsp', False):
-            return [], None, hidden, None
+            return [], None, hidden, None, divider_hidden
         wavelengths = current_file_data.get('wavelengths', [])
         options = [{'label': f'{int(w)} nm', 'value': int(w)} for w in wavelengths]
         wl_values = [int(w) for w in wavelengths]
         default_wl = 556 if 556 in wl_values else (wl_values[0] if wl_values else None)
-        return options, default_wl, visible, None
+        return options, default_wl, visible, None, divider_visible
 
     @app.callback(
         [Output('threshold-wavelength-selector-2', 'options'),
@@ -10443,74 +10644,100 @@ def run_app(initial_file_path, directory_path):
     # FILTER STATISTICS DISPLAY CALLBACKS
     # ---------------------------------------------------
 
-    def _compute_filter_stats(file_path, max_cost, threshold_params):
-        """
-        Compute N_total, N_after_cost, and N_after_threshold for a file.
-        Returns a formatted html.Div, or "" if data cannot be loaded.
-        """
+    def _compute_file_stats(file_path, max_cost, threshold_params):
+        """Return (n_total, n_cost, n_thresh) for one file, or None if unavailable."""
         if not file_path:
-            return ""
+            return None
         try:
             data_dict = get_cached_data(file_path)['data_dict']
         except Exception:
-            return ""
-
+            return None
         original_shape = data_dict.get('original_shape', (0,))
         n_total = int(np.prod(original_shape))
-
-        # N after cost filter
         cost_arr = data_dict['cost_function'].flatten()
         if max_cost is not None:
             n_cost = int((~np.isnan(cost_arr) & (cost_arr <= max_cost)).sum())
         else:
             n_cost = int(np.isfinite(cost_arr).sum())
-
-        # N after threshold (only meaningful for RSP files with active threshold)
         n_thresh = None
         if threshold_params and threshold_params.get('min_pct_views', 0) > 0:
             filtered, _ = filter_by_cost(data_dict, max_cost)
             filtered_thresh = apply_threshold_if_needed(filtered, threshold_params)
-            lat_flat = filtered_thresh['latitude'].flatten()
-            n_thresh = int(np.isfinite(lat_flat).sum())
+            n_thresh = int(np.isfinite(filtered_thresh['latitude'].flatten()).sum())
+        return n_total, n_cost, n_thresh
 
-        # Build compact display string
-        parts = [
-            html.Span(f"N total: {n_total:,}", style={'marginRight': '8px'}),
-            html.Span("→", style={'marginRight': '8px', 'color': '#aaa'}),
-            html.Span(f"after cost: {n_cost:,}", style={'marginRight': '8px'}),
+    def _stats_table(rows, show_thresh_col):
+        """Build a compact HTML table from a list of (label, n_total, n_cost, n_thresh) rows."""
+        cell = {'padding': '3px 8px', 'fontSize': '12px', 'textAlign': 'right',
+                'borderBottom': '1px solid #d5d8dc'}
+        cell_label = {**cell, 'textAlign': 'left', 'fontWeight': 'bold', 'color': '#34495e'}
+        th = {'padding': '3px 8px', 'fontSize': '11px', 'textAlign': 'right',
+              'color': 'white', 'backgroundColor': '#5d8aa8',
+              'borderBottom': '2px solid #aed6f1'}
+        th_label = {**th, 'textAlign': 'left'}
+
+        header_cells = [
+            html.Th("", style=th_label),
+            html.Th("N total", style=th),
+            html.Th("After cost", style=th),
         ]
-        if n_thresh is not None:
-            parts += [
-                html.Span("→", style={'marginRight': '8px', 'color': '#aaa'}),
-                html.Span(f"after threshold: {n_thresh:,}"),
+        if show_thresh_col:
+            header_cells.append(html.Th("After thresh", style=th))
+
+        table_rows = [html.Tr(header_cells)]
+        for label, n_total, n_cost, n_thresh in rows:
+            row_cells = [
+                html.Td(label, style=cell_label),
+                html.Td(f"{n_total:,}", style=cell),
+                html.Td(f"{n_cost:,}", style={**cell, 'color': '#1a5276' if n_cost < n_total else '#555'}),
             ]
-        return html.Div(parts, style={'whiteSpace': 'nowrap', 'overflow': 'hidden',
-                                      'textOverflow': 'ellipsis'})
+            if show_thresh_col:
+                thresh_str = f"{n_thresh:,}" if n_thresh is not None else "—"
+                thresh_color = '#6c3483' if n_thresh is not None and n_thresh < n_cost else '#aaa'
+                row_cells.append(html.Td(thresh_str, style={**cell, 'color': thresh_color}))
+            table_rows.append(html.Tr(row_cells))
+
+        return html.Table(table_rows, style={
+            'width': '100%', 'borderCollapse': 'collapse',
+            'marginTop': '4px', 'borderRadius': '4px', 'overflow': 'hidden'
+        })
 
     @app.callback(
-        Output('filter-stats-display', 'children'),
+        Output('filter-stats-table', 'children'),
         [Input('applied-cost-value', 'data'),
+         Input('applied-cost-value-2', 'data'),
          Input('applied-threshold-value', 'data'),
-         Input('current-file-data', 'data')],
-        prevent_initial_call=True
-    )
-    def update_filter_stats(max_cost, threshold_params, current_file_data):
-        """Show N_total / N_after_cost / N_after_threshold for file 1."""
-        print("Doing callback: update_filter_stats")
-        file_path = (current_file_data or {}).get('file_path')
-        return _compute_filter_stats(file_path, max_cost, threshold_params)
-
-    @app.callback(
-        Output('filter-stats-display-2', 'children'),
-        [Input('applied-cost-value', 'data'),
-         Input('applied-threshold-value-2', 'data')],
+         Input('applied-threshold-value-2', 'data'),
+         Input('current-file-data', 'data'),
+         Input('individual-analysis-mode', 'value')],
         [State('individual-file-selector-2', 'value')],
         prevent_initial_call=True
     )
-    def update_filter_stats_2(max_cost, threshold_params_2, file_path_2):
-        """Show N_total / N_after_cost / N_after_threshold for file 2."""
-        print("Doing callback: update_filter_stats_2")
-        return _compute_filter_stats(file_path_2, max_cost, threshold_params_2)
+    def update_filter_stats_table(max_cost, max_cost_2, threshold_params, threshold_params_2,
+                                  current_file_data, analysis_mode, file_path_2):
+        """Unified filter stats table shown at the bottom of the Filtering box."""
+        print("Doing callback: update_filter_stats_table")
+        file_path_1 = (current_file_data or {}).get('file_path')
+        stats_1 = _compute_file_stats(file_path_1, max_cost, threshold_params)
+        stats_2 = _compute_file_stats(file_path_2, max_cost_2, threshold_params_2) \
+                  if analysis_mode == 'multiple' else None
+
+        if stats_1 is None and stats_2 is None:
+            return ""
+
+        show_thresh = (
+            (stats_1 is not None and stats_1[2] is not None) or
+            (stats_2 is not None and stats_2[2] is not None)
+        )
+
+        rows = []
+        label_1 = "File 1" if stats_2 is not None else "File"
+        if stats_1 is not None:
+            rows.append((label_1, *stats_1))
+        if stats_2 is not None:
+            rows.append(("File 2", *stats_2))
+
+        return _stats_table(rows, show_thresh)
 
     # 3. UI SYNCHRONIZATION CALLBACKS
     # ---------------------------------------------------

@@ -1775,14 +1775,20 @@ def read_rsp_hdf5_variables(file_path):
                 # Check if we have component AODs for this wavelength
                 fine_key = f"optical_depth_fine_{wl}"
                 dust_key = f"optical_depth_dust_{wl}"
+                coarse_key = f"optical_depth_coarse_{wl}"
+                seasalt_key = f"optical_depth_seasalt_{wl}"
 
                 fine_key_2d = f"{fine_key}_2d"
                 dust_key_2d = f"{dust_key}_2d"
+                coarse_key_2d = f"{coarse_key}_2d"
+                seasalt_key_2d = f"{seasalt_key}_2d"
 
                 has_fine = fine_key_2d in data_dict
                 has_dust = dust_key_2d in data_dict
+                has_coarse = coarse_key_2d in data_dict
+                has_seasalt = seasalt_key_2d in data_dict
 
-                if has_fine or has_dust:
+                if has_fine or has_dust or has_coarse or has_seasalt:
                     # Initialize total AOD array
                     total_aod = np.full(original_shape, np.nan)
 
@@ -1804,6 +1810,18 @@ def read_rsp_hdf5_variables(file_path):
                         dust_valid = ~np.isnan(dust_data)
                         valid_data_mask |= dust_valid
                         aod_sum = np.where(dust_valid, aod_sum + np.nan_to_num(dust_data, nan=0.0), aod_sum)
+
+                    if has_coarse:
+                        coarse_data = data_dict[coarse_key_2d]
+                        coarse_valid = ~np.isnan(coarse_data)
+                        valid_data_mask |= coarse_valid
+                        aod_sum = np.where(coarse_valid, aod_sum + np.nan_to_num(coarse_data, nan=0.0), aod_sum)
+
+                    if has_seasalt:
+                        seasalt_data = data_dict[seasalt_key_2d]
+                        seasalt_valid = ~np.isnan(seasalt_data)
+                        valid_data_mask |= seasalt_valid
+                        aod_sum = np.where(seasalt_valid, aod_sum + np.nan_to_num(seasalt_data, nan=0.0), aod_sum)
 
                     # Only assign total aod where at least one component is not NaN
                     total_aod = np.where(valid_data_mask, aod_sum, np.nan)
@@ -4312,12 +4330,10 @@ def create_property_vs_time_plot(data_dict, property_name='optical_depth', mode=
             show_hsrl = (
                 hsrl_data is not None
                 and property_name == 'optical_depth'
-                and mode == 'total'
             )
             show_spex = (
                 spex_data is not None
                 and property_name == 'optical_depth'
-                and mode == 'total'
             )
 
             # Plot each wavelength
@@ -7436,7 +7452,8 @@ def run_app(initial_file_path, directory_path):
         Output('plot-type-selector', 'options'),
         [Input('file-selector', 'value'),
          Input('individual-file-selector-2', 'value'),
-         Input('individual-analysis-mode', 'value')]
+         Input('individual-analysis-mode', 'value')],
+        prevent_initial_call=True
     )
     def update_plot_type_options(file_path_1, file_path_2, analysis_mode):
         """
@@ -7489,7 +7506,8 @@ def run_app(initial_file_path, directory_path):
     @app.callback(
         Output('property-time-selector', 'options'),
         [Input('file-selector', 'value'),
-         Input('individual-file-selector-2', 'value')]
+         Input('individual-file-selector-2', 'value')],
+        prevent_initial_call=True
     )
     def update_property_time_options(file_path_1, file_path_2):
         """
@@ -7622,7 +7640,8 @@ def run_app(initial_file_path, directory_path):
          Output('plot-aod-time', 'style'),
          Output('plot-image-swath', 'style'),
          Output('plot-angular-dependence', 'style')],
-        Input('plot-type-selector', 'value')
+        Input('plot-type-selector', 'value'),
+        prevent_initial_call=True
     )
     def update_plot_visibility(plot_type):
         print(f"Updating plot visibility for: {plot_type}")
@@ -7669,7 +7688,8 @@ def run_app(initial_file_path, directory_path):
          Output('hist-property-selector-2-container', 'style'),
          Output('hist-property-selector-label', 'children')],
         [Input('plot-type-selector', 'value'),
-         Input('individual-analysis-mode', 'value')]
+         Input('individual-analysis-mode', 'value')],
+        prevent_initial_call=True
     )
     def update_plot_specific_controls(plot_type, analysis_mode):
         print(f"Updating plot-specific controls for: {plot_type}, mode: {analysis_mode}")
@@ -9246,7 +9266,7 @@ def run_app(initial_file_path, directory_path):
 
         # Load the data for the current file
         try:
-            data_dict, _, _, _ = load_retrieval_file(file_path)
+            data_dict = get_cached_data(file_path)['data_dict']
         except Exception as e:
             fig = go.Figure()
             fig.add_annotation(
@@ -9814,11 +9834,11 @@ def run_app(initial_file_path, directory_path):
             max_cost = current_file_data.get('max_cost_value', 200.0)
 
         try:
-            data_dict_1, _, _, _ = load_retrieval_file(file_path_1)
+            data_dict_1 = get_cached_data(file_path_1)['data_dict']
 
             if is_multi and file_path_2 and selected_property_2:
                 # --- Compare Files mode: separate side-by-side plots ---
-                data_dict_2, _, _, _ = load_retrieval_file(file_path_2)
+                data_dict_2 = get_cached_data(file_path_2)['data_dict']
 
                 fig1 = create_property_histogram(
                     data_dict_1, selected_property, max_cost,
@@ -9940,7 +9960,7 @@ def run_app(initial_file_path, directory_path):
                     raise ValueError("No file selected")
 
                 # Load data for file 1
-                data_dict, _, _, _ = load_retrieval_file(file_path_1)
+                data_dict = get_cached_data(file_path_1)['data_dict']
                 intensity_data, dolp_data, wavelengths = get_channel_intensity_dolp_vza(
                     data_dict, selected_row, selected_col
                 )
@@ -9970,8 +9990,8 @@ def run_app(initial_file_path, directory_path):
                     return fig
 
                 # Load data for both files
-                data_dict_1, _, _, _ = load_retrieval_file(file_path_1)
-                data_dict_2, _, _, _ = load_retrieval_file(file_path_2)
+                data_dict_1 = get_cached_data(file_path_1)['data_dict']
+                data_dict_2 = get_cached_data(file_path_2)['data_dict']
 
                 # Get data for the same point from both files
                 intensity_data_1, dolp_data_1, wavelengths_1 = get_channel_intensity_dolp_vza(
@@ -10111,7 +10131,7 @@ def run_app(initial_file_path, directory_path):
 
         # Load the data for the current file
         try:
-            data_dict, _, _, _ = load_retrieval_file(file_path)
+            data_dict = get_cached_data(file_path)['data_dict']
         except Exception as e:
             fig = go.Figure()
             fig.add_annotation(
@@ -10150,7 +10170,8 @@ def run_app(initial_file_path, directory_path):
     # ---------------------------------------------------
     @app.callback(
         Output('file-selector', 'value'),
-        Input('file-selector', 'value')
+        Input('file-selector', 'value'),
+        prevent_initial_call=True
     )
     def sync_file_selectors(file_selector_value):
         print("Doing callback: sync_file_selectors")
@@ -10189,7 +10210,7 @@ def run_app(initial_file_path, directory_path):
         f2_label = "File 2:"
         if selected_file_path_2:
             try:
-                data_dict_2, _, _, _ = load_retrieval_file(selected_file_path_2)
+                data_dict_2 = get_cached_data(selected_file_path_2)['data_dict']
                 f2_max_cost = float(np.nanmax(data_dict_2['cost_function']))
                 f2_min_cost = float(np.nanmin(data_dict_2['cost_function']))
                 f2_val = max(f2_min_cost, min(default_cost, f2_max_cost))
@@ -10218,7 +10239,11 @@ def run_app(initial_file_path, directory_path):
         # Read File 1
         try:
             print(f"selected_file_path = {selected_file_path}")
-            new_data_dict, new_sorted_variables, new_display_names, new_variable_metadata = load_retrieval_file(selected_file_path)
+            cached_1 = get_cached_data(selected_file_path)
+            new_data_dict = cached_1['data_dict']
+            new_sorted_variables = cached_1['sorted_variables']
+            new_display_names = cached_1['display_names']
+            new_variable_metadata = cached_1['variable_metadata']
 
             # Get new max cost value
             new_max_cost_value = np.nanmax(new_data_dict['cost_function'])
@@ -10282,7 +10307,10 @@ def run_app(initial_file_path, directory_path):
         if file_path_2 is None:
             return [], None
         try:
-            data_dict, sorted_variables, display_names, variable_metadata = load_retrieval_file(file_path_2)
+            cached = get_cached_data(file_path_2)
+            data_dict, sorted_variables, display_names, variable_metadata = (
+                cached['data_dict'], cached['sorted_variables'], cached['display_names'], cached['variable_metadata']
+            )
             options = create_dropdown_options(sorted_variables, display_names, variable_metadata)
             # Pick same default variable preference as File 1
             default_var = None
@@ -10311,7 +10339,10 @@ def run_app(initial_file_path, directory_path):
         if file_path is None:
             return [], None
         try:
-            data_dict, sorted_variables, display_names, variable_metadata = load_retrieval_file(file_path)
+            cached = get_cached_data(file_path)
+            data_dict, sorted_variables, display_names, variable_metadata = (
+                cached['data_dict'], cached['sorted_variables'], cached['display_names'], cached['variable_metadata']
+            )
             options = create_dropdown_options(sorted_variables, display_names, variable_metadata)
             default_var = None
             for var in sorted_variables:
@@ -10336,7 +10367,10 @@ def run_app(initial_file_path, directory_path):
         if file_path_2 is None:
             return [], None
         try:
-            data_dict, sorted_variables, display_names, variable_metadata = load_retrieval_file(file_path_2)
+            cached = get_cached_data(file_path_2)
+            data_dict, sorted_variables, display_names, variable_metadata = (
+                cached['data_dict'], cached['sorted_variables'], cached['display_names'], cached['variable_metadata']
+            )
             options = create_dropdown_options(sorted_variables, display_names, variable_metadata)
             default_var = None
             for var in sorted_variables:
@@ -10459,6 +10493,7 @@ def run_app(initial_file_path, directory_path):
          Output('cost-file-2-divider', 'style')],
         Input('individual-file-selector-2', 'value'),
         Input('individual-analysis-mode', 'value'),
+        prevent_initial_call=True
     )
     def toggle_cost_filter_2(file_path_2, analysis_mode):
         if analysis_mode == 'multiple' and file_path_2:
@@ -10573,7 +10608,7 @@ def run_app(initial_file_path, directory_path):
         if not file_path_2 or analysis_mode != 'multiple':
             return [], None, hidden, None
         try:
-            data_dict_2, _, _, _ = load_retrieval_file(file_path_2)
+            data_dict_2 = get_cached_data(file_path_2)['data_dict']
         except Exception:
             return [], None, hidden, None
         if 'rsp_time' not in data_dict_2:
@@ -11141,8 +11176,7 @@ def run_app(initial_file_path, directory_path):
             file_path = current_file_data.get('file_path')
 
             # Read data from current file
-            data_dict, sorted_variables, display_names, variable_metadata = \
-                load_retrieval_file(file_path)
+            data_dict = get_cached_data(file_path)['data_dict']
 
             # Filter data and get indices
             filtered_data, original_indices = filter_by_cost(data_dict, max_cost)
@@ -11199,8 +11233,7 @@ def run_app(initial_file_path, directory_path):
             file_path = current_file_data.get('file_path')
 
             # Read data from current file
-            data_dict, sorted_variables, display_names, variable_metadata = \
-                load_retrieval_file(file_path)
+            data_dict = get_cached_data(file_path)['data_dict']
 
             # Filter data and get indices
             filtered_data, original_indices = filter_by_cost(data_dict, max_cost)

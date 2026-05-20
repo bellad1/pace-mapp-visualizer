@@ -7774,16 +7774,21 @@ def run_app(initial_file_path, directory_path):
          Input('applied-threshold-value-2', 'data'),
          # Input('multi-file-clicked-point', 'data')],
          Input('scatter-plot-1', 'clickData'),
-         Input('find-point-button', 'n_clicks')],
+         Input('find-point-button', 'n_clicks'),
+         Input('plot-type-selector', 'value')],
         [State('latitude-input', 'value'),
          State('longitude-input', 'value')],
         prevent_initial_call=True
     )
     def update_scatter_multi(analysis_mode, file_path_1, file_path_2, selected_property, selected_property_2,
                              max_cost, max_cost_2, threshold_params, threshold_params_2,
-                             clickData, find_button_clicks, input_lat, input_lon):
+                             clickData, find_button_clicks, plot_type, input_lat, input_lon):
         from dash import callback_context
         print("Doing callback: update_scatter_multi")
+
+        if plot_type != 'scatter':
+            return (no_update,) * 21
+
 
         # Define number of returned figures/headers
         NUM_FIGURES = 10
@@ -9774,18 +9779,23 @@ def run_app(initial_file_path, directory_path):
        Input('applied-threshold-value', 'data'),
        Input('applied-threshold-value-2', 'data'),
        Input('current-file-data', 'data'),
-       Input('individual-analysis-mode', 'value')],
+       Input('individual-analysis-mode', 'value'),
+       Input('plot-type-selector', 'value')],
       [State('individual-file-selector-2', 'value')],
       prevent_initial_call=True
       )
     def update_histogram(selected_property, selected_property_2, n_bins, n_bins_2,
                          max_cost, max_cost_2, threshold_params, threshold_params_2,
-                         current_file_data, analysis_mode, file_path_2):
+                         current_file_data, analysis_mode, plot_type, file_path_2):
         """
         Update histogram based on selected property, bin count, and cost threshold.
         Supports both Single File and Compare Files modes.
         """
         print("Doing callback: update_histogram")
+
+        if plot_type != 'histogram':
+            return (no_update,) * 7
+
 
         is_multi = (analysis_mode == 'multiple')
         empty_fig = go.Figure()
@@ -10270,6 +10280,7 @@ def run_app(initial_file_path, directory_path):
             new_file_data = {
                 'file_path': selected_file_path,
                 'max_cost_value': float(new_max_cost_value),
+                'min_cost_value': float(new_min_cost_value),
                 'default_var': new_default_var,
                 'is_rsp': new_is_rsp,
                 'wavelengths': new_wavelengths
@@ -10455,9 +10466,10 @@ def run_app(initial_file_path, directory_path):
 
         # Safer to use default value if max_cost_value can't be found
         max_cost_value = 200.0
+        min_cost_value = 0.0
         if current_file_data is not None:
-            # Get current max cost val from store
             max_cost_value = current_file_data.get('max_cost_value', 10.0)
+            min_cost_value = current_file_data.get('min_cost_value', 0.0)
 
         if debug > 1:
             print("Max cost value:", max_cost_value)
@@ -10476,8 +10488,8 @@ def run_app(initial_file_path, directory_path):
             return default_val, f"Invalid input. Using default cost value ({default_cost})", default_val
 
         # Ensure cost val is within bounds
-        if input_value < 0:
-            return 0, "Input was less than 0. Using minimum value (0).", 0
+        if input_value < min_cost_value:
+            return min_cost_value, f"Input below minimum. Using minimum value ({min_cost_value:.3f}).", min_cost_value
 
         if input_value > max_cost_value:
             return max_cost_value, f"Input exceeded maximum. Using maximum value ({max_cost_value:.2f}).", max_cost_value
@@ -10544,10 +10556,14 @@ def run_app(initial_file_path, directory_path):
         if n_clicks == 0:
             return no_update, "", no_update
         max_cost_value = 200.0
+        min_cost_value = 0.0
         if file_path_2:
-            cached = get_cached_data(file_path_2)
-            if cached:
-                max_cost_value = cached.get('max_cost_value', 10.0)
+            try:
+                cost_arr = get_cached_data(file_path_2)['data_dict']['cost_function']
+                max_cost_value = float(np.nanmax(cost_arr))
+                min_cost_value = float(np.nanmin(cost_arr))
+            except Exception:
+                pass
         if input_value is None or input_value == "":
             default_val = min(default_cost, max_cost_value)
             return default_val, f"Using default cost value ({default_cost})", default_val
@@ -10557,8 +10573,8 @@ def run_app(initial_file_path, directory_path):
         except (ValueError, TypeError):
             default_val = min(default_cost, max_cost_value)
             return default_val, f"Invalid input. Using default cost value ({default_cost})", default_val
-        if input_value < 0:
-            return 0, "Input was less than 0. Using minimum value (0).", 0
+        if input_value < min_cost_value:
+            return min_cost_value, f"Input below minimum. Using minimum value ({min_cost_value:.3f}).", min_cost_value
         if input_value > max_cost_value:
             return max_cost_value, f"Input exceeded maximum. Using maximum value ({max_cost_value:.2f}).", max_cost_value
         return input_value, f"Using cost threshold: {input_value:.3f}", input_value
@@ -10871,17 +10887,21 @@ def run_app(initial_file_path, directory_path):
          Input('applied-threshold-value', 'data'),
          Input('scatter-plot-single', 'clickData'),
          Input('find-point-button', 'n_clicks'),
-         Input('current-file-data', 'data')],
+         Input('current-file-data', 'data'),
+         Input('plot-type-selector', 'value')],
         [State('latitude-input', 'value'),
          State('longitude-input', 'value'),
-         State('clicked-point-store', 'data'),
-         State('plot-type-selector', 'value')],
+         State('clicked-point-store', 'data')],
         # prevent_initial_call='initial_duplicate'
         prevent_initial_call=True
     )
     def update_scatter_single(selected_property, max_cost, threshold_params, clickData, find_button_clicks,
-                              current_file_data, input_lat, input_lon, stored_point_data, plot_type):
+                              current_file_data, plot_type, input_lat, input_lon, stored_point_data):
         print("Doing callback: update_scatter_single")
+
+        if plot_type != 'scatter':
+            return (no_update,) * 12
+
 
         # Determine which input triggered callback
         ctx = callback_context
